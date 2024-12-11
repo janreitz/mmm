@@ -5,7 +5,7 @@ from Queue import Queue, Empty
 from time import sleep, strftime
 from signal import signal, SIGINT
 from os import environ
-from monotonic import monotonic as mtime
+from time import monotonic as mtime
 import traceback
 
 import Buttons

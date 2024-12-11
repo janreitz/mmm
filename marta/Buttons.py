@@ -1,5 +1,5 @@
 from logging import getLogger
-from monotonic import monotonic as mtime
+from time import monotonic as mtime
 
 import RPi.GPIO as GPIO
 
