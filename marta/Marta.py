@@ -1,7 +1,7 @@
 # system
 from logging import handlers, getLogger, DEBUG, Formatter, StreamHandler
 from sys import stdout, argv
-from Queue import Queue, Empty
+from queue import Queue, Empty
 from time import sleep, strftime
 from signal import signal, SIGINT
 from os import environ
