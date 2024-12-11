@@ -301,7 +301,7 @@ def main():
     player = MPG123Player(lambda: debug("song stopped"), lambda: debug("error"), 50)
 
     debug("enter song file path")
-    mp3_path = raw_input()
+    mp3_path = input()
 
     debug("CTRL + C to interrupt")
 

@@ -106,7 +106,7 @@ def main():
     reader = RFIDReader(lambda tag: debug("tag: " + str(tag)))
 
     try:
-        raw_input()
+        input()
     except:
         pass
 

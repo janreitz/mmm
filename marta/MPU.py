@@ -134,12 +134,12 @@ def main():
 
     debug("tilt the device!")
     debug("ENTER to start, ENTER or CTRL + C to quit")
-    raw_input()
+    input()
 
     mpu = MPU(0.5, 0, lambda x, y: debug("rot=" + str(x) + ", " + str(y)))
 
     try:
-        raw_input()
+        input()
     except:
         pass
 

@@ -96,7 +96,7 @@ def main():
     setup_gpio(lambda pin, millis: debug(BUTTONS_HUMAN_READABLE[pin] + ": " + str(millis) + " ms"))
 
     try:
-        raw_input()
+        input()
     except:
         pass
 

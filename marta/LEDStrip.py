@@ -274,7 +274,7 @@ def main():
     leds.rainbow_demo()
 
     try:
-        raw_input()
+        input()
     except:
         pass
 
