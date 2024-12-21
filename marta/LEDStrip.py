@@ -43,7 +43,7 @@ class LEDStrip(object):
     WHITE = Color(255, 255, 255)
     ORANGE = Color(0xFF, 0x8C, 0x00)
 
-    _LEDS = range(_LED_COUNT)
+    _LEDS = list(range(_LED_COUNT))
     _VOLUME_LEDS = _LEDS[4:14]
     _LEDS_FROM_MIDDLE = _LEDS[2:] + _LEDS[:2]
     _LEDS_SONG = _LEDS_FROM_MIDDLE[2:-2]
