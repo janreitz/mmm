@@ -39,7 +39,7 @@ def setup_gpio(button_callback):
     def edge_detected_on_pin(event_pin):
         # debug("button event: " + BUTTONS_HUMAN_READABLE[pin])
         event_pin_is_pushed = False if GPIO.input(event_pin) == 1 else True
-        event_pin_was_already_pushed = buttons_last_pushed_time[event_pin] is not 0
+        event_pin_was_already_pushed = buttons_last_pushed_time[event_pin] != 0
 
         # debug("is: " + str(event_pin_is_pushed) + ", war: " + str(event_pin_was_already_pushed))
 
