@@ -24,3 +24,12 @@ To actually get sound output from the DAC, the `XSMT` pin must be connected to l
 ## SDM63000
 
 In addition to setting the baud rate for the serial input, I had to disable buffering (`stty -F /dev/serial0 raw`) to be able to read serial input with standard tools like `cat`.
+
+## Buttons
+
+The rpi-gpio package no longer works starting PiOS bookworm, because the gpio interface was changed. The rpi-lgpio package provides a compatibility shim. Installation via the package manager, as described on the lgpio docs site, did not work for me (`sudo apt install python3-rpi-lgpio`). I needed to install a few dependencies via `apt` before I successfully getting and building rpi-lgpio via pip.
+- `sudo apt install swig liblgpio-dev`
+- (In a venv) `pip3 install rpi-lgpio`
+
+## Serial interface
+
