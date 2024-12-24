@@ -1,3 +1,4 @@
+import os
 from os import listdir
 from os.path import isdir
 from logging import getLogger
@@ -21,7 +22,7 @@ def prepare_albums(tag_path):
     current_album_dir = None
     at_least_one_file = False
     for album_dir in possible_albums:
-        current = tag_path + "/" + album_dir
+        current = os.path.join(tag_path, album_dir)
 
         if isdir(current):
             files = listdir(current)
@@ -65,7 +66,7 @@ def prepare(audio_path):
 
     for d in dirs:
 
-        current = audio_path + "/" + d
+        current = os.path.join(audio_path, d)
 
         if not isdir(audio_path + "/" + d):
             raise Exception("not a directory: " + current)
