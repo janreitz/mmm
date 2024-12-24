@@ -87,7 +87,7 @@ class MPG123Player(object):
 
         if line.startswith(b'@SAMPLE '):
             line = line[8:-1]
-            line = line.split(' ')
+            line = line.split(b' ')
             self._track_position_in_samples = int(line[0])
             debug("current position: %d", self._track_position_in_samples)
             self._track_length_in_samples = int(line[1])
@@ -96,7 +96,7 @@ class MPG123Player(object):
 
         if line.startswith(b'@S '):
             self._expecting_input = False
-            sample_rate = int(line.split(" ")[3]) / float(1000)
+            sample_rate = int(line.split(b' ')[3]) / float(1000)
             self._track_length_in_millis = int(round(self._track_length_in_samples / sample_rate))
             debug("track length: %d", self._track_length_in_millis)
             self._program_responded.set()
@@ -108,14 +108,14 @@ class MPG123Player(object):
 
         if line.startswith(b'@V '):
             line = line[3:-1]
-            line = line.split('%')[0]
+            line = line.split(b'%')[0]
             self._volume = float(line)
             debug("volume: %f", self._volume)
             self._program_responded.set()
             return
 
         if line.startswith(b'@PITCH '):
-            line = line.split(' ')[1]
+            line = line.split(b' ')[1]
             self._actual_program_pitch = round((float(line) + 1) * 100)
             debug("pitch: %f", self._actual_program_pitch)
             self._program_responded.set()
