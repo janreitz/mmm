@@ -34,16 +34,17 @@ class RFIDReader(object):
 
     DEFAULT_TIMEOUT = 0.5
 
-    START_BYTE = "\x02"
+    START_BYTE = b"\x02"
 
-    END_BYTE = "\x03"
+    END_BYTE = b"\x03"
 
     def __init__(self, on_detection, port=DEFAULT_PORT, baud_rate=DEFAULT_BAUD_RATE, timeout=DEFAULT_TIMEOUT):
         self._old_tag = ""
         self._stop_read_thread = Event()
 
         self._on_detection = on_detection
-        self._serial_conn = Serial(port, baud_rate, timeout=timeout)
+        self._serial_conn = Serial(port, baud_rate, timeout=timeout, rtscts=False, dsrdtr=False)
+        self._serial_conn.set_low_latency_mode(True)  # Force raw mode
 
         self._read_rfid_thread = Thread(target=self._read_rfid)
         self._read_rfid_thread.daemon = True
@@ -54,7 +55,10 @@ class RFIDReader(object):
         while not self._stop_read_thread.is_set():
 
             head = self._serial_conn.read()
+            debug(f"Read head: {head!r}")
+            
             if len(head) == 0 and self._old_tag != "":
+                debug("No data read, clearing old tag")
                 self._on_detection(None)
                 self._old_tag = ""
 
@@ -63,8 +67,13 @@ class RFIDReader(object):
                 # actually the tag data is divided into 2 bytes version + 8 bytes tag + 2 bytes checksum
                 # I couldn't find out anything about the version differences, so I just ignored it.
                 tag = self._serial_conn.read(12)
-
+                debug(f"Read tag data: {tag!r}")
+                tag = tag.decode()
+                
                 tail = self._serial_conn.read()
+                debug(f"Read tail: {tail!r}")
+                
+                
                 if tail == RFIDReader.END_BYTE and self._old_tag != tag:
 
                     # the checksum is calculated by XORing the version and tag bytes
