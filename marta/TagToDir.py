@@ -74,6 +74,12 @@ def prepare(audio_path):
         if d == "system":
             continue
 
+        debug(f"Checking directory: {d}")
+        m = match(regex, d)
+        debug(f"Match result: {m}")
+        if m:
+            debug(f"Groups: {m.groups()}")
+
         if not match(regex, d):
             raise Exception("naming convention error: " + current)
 
