@@ -55,17 +55,17 @@ class MPG123Player(object):
     def _mpg123_input(self, line):
         debug("< " + str(line))
 
-        if line.startswith('@R MPG123'):
+        if line.startswith(b'@R MPG123'):
             debug("mpg123 startup")
             self._program_responded.set()
             return
 
-        if line.startswith('@E '):
+        if line.startswith(b'@E '):
             self._was_error = True
             self._program_responded.set()
             return
 
-        if line.startswith('@P 0'):
+        if line.startswith(b'@P 0'):
             self._current_state = MPG123Player.STATE_STOPPED
             self._program_responded.set()
             self._current_file = None
@@ -73,19 +73,19 @@ class MPG123Player(object):
             debug("state=STOPPED")
             return
 
-        if line.startswith('@P 1'):
+        if line.startswith(b'@P 1'):
             self._current_state = MPG123Player.STATE_PAUSED
             debug("state=PAUSED")
             self._program_responded.set()
             return
 
-        if line.startswith('@P 2'):
+        if line.startswith(b'@P 2'):
             self._current_state = MPG123Player.STATE_PLAYING
             debug("state=PLAYING")
             self._program_responded.set()
             return
 
-        if line.startswith('@SAMPLE '):
+        if line.startswith(b'@SAMPLE '):
             line = line[8:-1]
             line = line.split(' ')
             self._track_position_in_samples = int(line[0])
@@ -94,7 +94,7 @@ class MPG123Player(object):
             self._program_responded.set()
             return
 
-        if line.startswith('@S '):
+        if line.startswith(b'@S '):
             self._expecting_input = False
             sample_rate = int(line.split(" ")[3]) / float(1000)
             self._track_length_in_millis = int(round(self._track_length_in_samples / sample_rate))
@@ -102,11 +102,11 @@ class MPG123Player(object):
             self._program_responded.set()
             return
 
-        if line.startswith('@K '):
+        if line.startswith(b'@K '):
             self._program_responded.set()
             return
 
-        if line.startswith('@V '):
+        if line.startswith(b'@V '):
             line = line[3:-1]
             line = line.split('%')[0]
             self._volume = float(line)
@@ -114,7 +114,7 @@ class MPG123Player(object):
             self._program_responded.set()
             return
 
-        if line.startswith('@PITCH '):
+        if line.startswith(b'@PITCH '):
             line = line.split(' ')[1]
             self._actual_program_pitch = round((float(line) + 1) * 100)
             debug("pitch: %f", self._actual_program_pitch)
