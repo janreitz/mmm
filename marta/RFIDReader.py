@@ -30,7 +30,7 @@ debug = getLogger('RFIDReader').debug
 class RFIDReader(object):
     DEFAULT_BAUD_RATE = 9600
 
-    DEFAULT_PORT = "/dev/ttyS0"
+    DEFAULT_PORT = "/dev/serial0"
 
     DEFAULT_TIMEOUT = 0.5
 
