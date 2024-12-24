@@ -150,7 +150,7 @@ class MPG123Player(object):
 
         debug("waiting for max " + str(self._ipc_timeout) + " seconds")
         self._program_responded.wait(self._ipc_timeout)
-        if not self._program_responded.isSet():
+        if not self._program_responded.is_set():
             raise Exception("timeout: " + str(self._ipc_timeout) + " sec")
 
         if self._was_error:
