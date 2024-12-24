@@ -92,8 +92,8 @@ class Marta(object):
         while not self.__message_queue.empty():
             self.__message_queue.get(block=False)
 
-        self.mpu = MPU(period=1, threshold=5,
-                       rotation_receiver=lambda x, y: self.__message_queue.put([Marta.EVENT_ROTATION, x, y]))
+        # self.mpu = MPU(period=1, threshold=5,
+        #                rotation_receiver=lambda x, y: self.__message_queue.put([Marta.EVENT_ROTATION, x, y]))
 
         self.rfid_reader = RFIDReader(lambda tag: self.__message_queue.put([Marta.EVENT_RFID_TAG, tag]))
 
@@ -207,10 +207,10 @@ class Marta(object):
         except:
             pass
 
-        try:
-            self.mpu.terminate()
-        except:
-            pass
+        # try:
+            # self.mpu.terminate()
+        # except:
+            # pass
 
         try:
             self.player.terminate()
