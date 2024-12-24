@@ -145,7 +145,7 @@ class MPG123Player(object):
     def _command(self, command):
         self._program_responded.clear()
         debug("> " + str(command))
-        self._mpg123_process.stdin.write(command + '\n')
+        self._mpg123_process.stdin.write((command + '\n').encode())
         self._mpg123_process.stdin.flush()
 
         debug("waiting for max " + str(self._ipc_timeout) + " seconds")
