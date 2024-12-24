@@ -43,7 +43,7 @@ class MPU(object):
     def _read_mpu(self):
         while True:
             self._stop_event.wait(self._period - TIME_TO_READ)
-            if self._stop_event.isSet():
+            if self._stop_event.is_set():
                 debug("stop event received!")
                 break
 
@@ -108,7 +108,7 @@ class MPU(object):
             xs.append(x)
             ys.append(y)
             self._stop_event.wait(SLEEP_BETWEEN_READS)
-            if self._stop_event.isSet():
+            if self._stop_event.is_set():
                 debug("terminated while reading average rotation")
                 return None, None
 

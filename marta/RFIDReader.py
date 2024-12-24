@@ -51,7 +51,7 @@ class RFIDReader(object):
 
     def _read_rfid(self):
 
-        while not self._stop_read_thread.isSet():
+        while not self._stop_read_thread.is_set():
 
             head = self._serial_conn.read()
             if len(head) == 0 and self._old_tag != "":
