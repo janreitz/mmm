@@ -51,21 +51,19 @@ def prepare_albums(tag_path):
 
 
 def prepare(audio_path):
+    debug("Preparing audio directory: " + audio_path)
+    
     if not isdir(audio_path):
         debug("not a directory: " + audio_path)
         exit(1)
 
     if not isdir(audio_path + "/system"):
-        raise Exception("missing directory: " + audio_path + "/system")
+        raise Exception("missing system directory, expected at: " + os.path.join(audio_path, "system"))
 
     dirs = listdir(audio_path)
-
     regex = compile("^.*([0-9A-F]{12})$")
 
-    debug(audio_path + "/system exists")
-
     for d in dirs:
-
         current = os.path.join(audio_path, d)
 
         if not isdir(audio_path + "/" + d):
@@ -73,12 +71,6 @@ def prepare(audio_path):
 
         if d == "system":
             continue
-
-        debug(f"Checking directory: {d}")
-        m = match(regex, d)
-        debug(f"Match result: {m}")
-        if m:
-            debug(f"Groups: {m.groups()}")
 
         if not match(regex, d):
             raise Exception("naming convention error: " + current)
