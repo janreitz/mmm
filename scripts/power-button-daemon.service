@@ -3,7 +3,7 @@ Description=Power Management Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/power-daemon.py
+ExecStart=/usr/local/bin/power_button_daemon.py
 Restart=always
 User=root
 
