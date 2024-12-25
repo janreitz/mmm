@@ -104,7 +104,7 @@ class MusicHandler(MartaHandler):
                 lines = [line.strip() for line in lines]
                 self.current_song_index = int(lines[0])
                 debug("current song index: " + str(self.current_song_index))
-                current_pos = long(lines[1])
+                current_pos = int(lines[1])
                 debug("current song position: " + str(current_pos))
 
         self.all_songs = [self.current_song_dir + "/" + song for song in songs]
