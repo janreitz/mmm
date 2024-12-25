@@ -1,0 +1,15 @@
+[Unit]
+Description=Marta Music Box
+# Start as early as possible, but after essential system services
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=MARTA=/home/jan/mmm
+ExecStart=/home/jan/mmm/marta/env/bin/python /home/jan/mmm/marta/Marta.py
+User=root
+Restart=on-failure
+
+[Install]
+WantedBy=sysinit.target
