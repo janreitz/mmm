@@ -1,0 +1,11 @@
+[Unit]
+Description=Power Management Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/power-daemon.py
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
