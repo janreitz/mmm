@@ -59,6 +59,12 @@ class MPG123Player(object):
             debug("mpg123 startup")
             self._program_responded.set()
             return
+        
+        if line.startswith(b'@I '):
+            # Handle metadata info messages
+            debug(f"metadata info message: %s", line)
+            self._program_responded.set()
+            return
 
         if line.startswith(b'@E '):
             self._was_error = True
