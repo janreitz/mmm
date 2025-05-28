@@ -1,6 +1,6 @@
 [Unit]
 Description=Power Management Daemon
-After=network.target
+Before=network-pre.target
 
 [Service]
 ExecStart=/home/jan/mmm/marta/env/bin/python /usr/local/bin/power_button_daemon.py

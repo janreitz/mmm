@@ -2,7 +2,7 @@
 Description=Marta Music Box
 # Start as early as possible, but after essential system services
 DefaultDependencies=no
-After=local-fs.target
+Before=network-pre.target
 
 [Service]
 Type=simple
