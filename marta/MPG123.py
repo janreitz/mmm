@@ -237,17 +237,30 @@ class MPG123Player(object):
             debug(f"Error setting position: {e}")
             return False
 
-    def get_track_length_in_millis(self):
-        return self._track_length_in_millis
+    def get_position_in_millis(self):
+        # Add precondition check here too
+        if self._track_length_in_millis <= 0 or self._track_length_in_samples <= 0:
+            debug("Cannot get position: track length not determined yet")
+            return 0
+            
+        try:
+            current_pos, length = self._get_position_in_samples()
+            if length <= 0:
+                return 0
+            return int(round((float(current_pos) / length) * self._track_length_in_millis))
+        except Exception as e:
+            debug(f"Error getting position: {e}")
+            return 0
 
     def load_track_from_file(self, file_name):
         if file_name == self._current_file:
             debug("file already loaded")
-            return
+            return True
 
         self._current_file = file_name
         okay = self._command('LP ' + file_name)
         if not okay:
+            debug("Failed to load file: " + file_name)
             return False
 
         self._get_position_in_samples()
@@ -259,7 +272,13 @@ class MPG123Player(object):
         self.pause_track()
         self.set_volume(volume_before)
 
-        self.set_position_in_millis(0)
+        # Only try to set position if we have valid track length
+        if self._track_length_in_millis > 0 and self._track_length_in_samples > 0:
+            result = self.set_position_in_millis(0)
+            if not result:
+                debug("Warning: Could not reset position to start")
+        else:
+            debug("Warning: Track length not properly determined, skipping position reset")
 
         if self._pitch != self._actual_program_pitch:
             self.set_pitch(self._pitch)
