@@ -1,7 +1,6 @@
 from logging import getLogger
 from time import monotonic as mtime
-
-import RPi.GPIO as GPIO
+from gpiozero import Button, LED
 
 debug = getLogger('   Buttons').debug
 
@@ -23,66 +22,92 @@ BUTTONS_HUMAN_READABLE = {
     POWER_BUTTON: "POWER"
 }
 
+# Global variables for gpiozero objects
+_buttons = {}
+_status_led = None
+_button_callback = None
+_buttons_last_pushed_time = {}
 
 def setup_gpio(button_callback):
-    debug("setting up gpio")
-
-    # GPIO 20 is already in use? By whom? I have no idea.
-    GPIO.setwarnings(False)
-
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(RUN_LED, GPIO.OUT)
-
-    buttons_last_pushed_time = {
-    }
-
-    def edge_detected_on_pin(event_pin):
-        # debug("button event: " + BUTTONS_HUMAN_READABLE[pin])
-        event_pin_is_pushed = False if GPIO.input(event_pin) == 1 else True
-        event_pin_was_already_pushed = buttons_last_pushed_time[event_pin] != 0
-
-        # debug("is: " + str(event_pin_is_pushed) + ", war: " + str(event_pin_was_already_pushed))
-
-        if event_pin_is_pushed is event_pin_was_already_pushed:
-            # debug("ignoring. no new state")
-            return
-
-        now = int(mtime() * 1000)
-
-        if event_pin_is_pushed:
-            # debug("now on")
-            buttons_last_pushed_time[event_pin] = now
-            return
-
-        diff = now - buttons_last_pushed_time[event_pin]
-        buttons_last_pushed_time[event_pin] = 0
-
-        if diff < 50:
-            return
-
-        debug("push event on pin " + str(event_pin) + ": " + str(diff))
-        button_callback(event_pin, diff)
-
+    global _buttons, _status_led, _button_callback, _buttons_last_pushed_time
+    
+    debug("setting up gpio with gpiozero")
+    
+    _button_callback = button_callback
+    
+    # Initialize button tracking
     for pin in COLOR_BUTTONS + [POWER_BUTTON]:
-        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.add_event_detect(pin, GPIO.BOTH, callback=edge_detected_on_pin)
-        buttons_last_pushed_time[pin] = 0
+        _buttons_last_pushed_time[pin] = 0
+    
+    # Setup status LED
+    _status_led = LED(RUN_LED)
+    
+    # Setup buttons with pull-up resistors and debouncing
+    for pin in COLOR_BUTTONS + [POWER_BUTTON]:
+        # bounce_time handles debouncing automatically
+        btn = Button(pin, pull_up=True, bounce_time=0.05)
+        btn.when_pressed = lambda btn_obj, pin=pin: _on_button_press(pin)
+        btn.when_released = lambda btn_obj, pin=pin: _on_button_release(pin)
+        _buttons[pin] = btn
+        debug(f"Setup button on pin {pin}")
 
+def _on_button_press(pin):
+    """Called when button is pressed down"""
+    now = int(mtime() * 1000)
+    _buttons_last_pushed_time[pin] = now
+    debug(f"Button {BUTTONS_HUMAN_READABLE.get(pin, pin)} pressed")
+
+def _on_button_release(pin):
+    """Called when button is released - this is where we trigger the callback"""
+    now = int(mtime() * 1000)
+    press_time = _buttons_last_pushed_time[pin]
+    
+    if press_time == 0:
+        debug(f"Button {pin} released but no press time recorded")
+        return
+    
+    diff = now - press_time
+    _buttons_last_pushed_time[pin] = 0
+    
+    if diff < 50:  # Debounce - ignore very short presses
+        debug(f"Button {pin} press too short ({diff}ms), ignoring")
+        return
+    
+    debug("push event on pin " + str(pin) + ": " + str(diff))
+    if _button_callback:
+        _button_callback(pin, diff)
 
 def set_status_led(value):
-    GPIO.output(RUN_LED, value)
-
+    """Set the status LED on (True/1) or off (False/0)"""
+    global _status_led
+    if _status_led:
+        if value:
+            _status_led.on()
+        else:
+            _status_led.off()
 
 def is_pushed(pin):
-    v = False if GPIO.input(pin) == 1 else True
-    debug("pin " + str(pin) + ": " + str(v))
-    return v
-
+    """Check if a button is currently being pressed"""
+    global _buttons
+    if pin in _buttons:
+        # With pull_up=True, the button reads False when pressed
+        return not _buttons[pin].is_pressed
+    debug(f"Button {pin} not found in setup buttons")
+    return False
 
 def terminate():
+    """Clean up GPIO resources"""
+    global _buttons, _status_led
     debug("terminating")
-    GPIO.cleanup()
-
+    
+    if _status_led:
+        _status_led.close()
+        _status_led = None
+    
+    for pin, btn in _buttons.items():
+        debug(f"Closing button {pin}")
+        btn.close()
+    _buttons.clear()
 
 ################################################################
 
@@ -101,7 +126,6 @@ def main():
         pass
 
     terminate()
-
 
 if __name__ == "__main__":
     main()
