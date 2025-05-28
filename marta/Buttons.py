@@ -4,7 +4,6 @@ from gpiozero import Button, LED
 
 debug = getLogger('   Buttons').debug
 
-POWER_BUTTON = 17
 RUN_LED = 20
 
 YELLOW_BUTTON = 5
@@ -19,7 +18,6 @@ BUTTONS_HUMAN_READABLE = {
     BLUE_BUTTON: "BLUE",
     RED_BUTTON: "RED",
     GREEN_BUTTON: "GREEN",
-    POWER_BUTTON: "POWER"
 }
 
 # Global variables for gpiozero objects
@@ -36,14 +34,14 @@ def setup_gpio(button_callback):
     _button_callback = button_callback
     
     # Initialize button tracking
-    for pin in COLOR_BUTTONS + [POWER_BUTTON]:
+    for pin in COLOR_BUTTONS:
         _buttons_last_pushed_time[pin] = 0
     
     # Setup status LED
     _status_led = LED(RUN_LED)
     
     # Setup buttons with pull-up resistors and debouncing
-    for pin in COLOR_BUTTONS + [POWER_BUTTON]:
+    for pin in COLOR_BUTTONS:
         # bounce_time handles debouncing automatically
         btn = Button(pin, pull_up=True, bounce_time=0.05)
         btn.when_pressed = lambda btn_obj, pin=pin: _on_button_press(pin)

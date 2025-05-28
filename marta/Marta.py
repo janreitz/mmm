@@ -58,17 +58,13 @@ class Marta(object):
         self.__message_queue = Queue()
         Buttons.setup_gpio(lambda pin, millis: self.__message_queue.put([Marta.EVENT_BUTTON, pin, millis]))
 
-        if Buttons.is_pushed(Buttons.POWER_BUTTON) and Buttons.is_pushed(Buttons.RED_BUTTON):
-            Buttons.terminate()
-            debug("Early user interrupt!")
-            exit(Marta.EXIT_DEBUG)
-
         self.player = MPG123Player(lambda: self.__message_queue.put([Marta.EVENT_SONG_STOPPED]),
                                    lambda: self.__message_queue.put([Marta.EVENT_MPG123_ERROR]),
                                    volume=Marta.SYSTEM_SOUND_VOLUME)
 
         self.leds = LEDStrip()
 
+        debug(f"Loading startup sound from: {Marta.START_SOUND_PATH}")
         self.player.load_track_from_file(Marta.START_SOUND_PATH)
         self.leds.startup()
         self.player.play_track()
@@ -141,10 +137,6 @@ class Marta(object):
 
             elif event == Marta.EVENT_MPG123_ERROR:
                 debug("Critical: MPG123 error event!")
-                break
-
-            elif event == Marta.EVENT_BUTTON and params[0] == Buttons.POWER_BUTTON:
-                debug("Critical: Power button event!")
                 break
 
             elif event == Marta.EVENT_RFID_TAG:
