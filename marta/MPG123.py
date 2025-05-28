@@ -211,9 +211,31 @@ class MPG123Player(object):
         return int(round((float(current_pos) / length) * self._track_length_in_millis))
 
     def set_position_in_millis(self, position_in_millis):
-        position_in_millis /= float(self._track_length_in_millis)
-        position_in_millis = int(round(position_in_millis * self._track_length_in_samples))
-        self._command('K ' + str(position_in_millis))
+        # Precondition checks
+        if self._track_length_in_millis <= 0:
+            debug("Cannot set position: track length not determined yet or is zero")
+            return False
+            
+        if self._track_length_in_samples <= 0:
+            debug("Cannot set position: track samples not determined yet or is zero")
+            return False
+            
+        if position_in_millis < 0:
+            debug("Cannot set position: negative position not allowed")
+            return False
+            
+        if position_in_millis > self._track_length_in_millis:
+            debug(f"Position {position_in_millis}ms exceeds track length {self._track_length_in_millis}ms, clamping")
+            position_in_millis = self._track_length_in_millis
+        
+        try:
+            position_in_millis /= float(self._track_length_in_millis)
+            position_in_millis = int(round(position_in_millis * self._track_length_in_samples))
+            self._command('K ' + str(position_in_millis))
+            return True
+        except Exception as e:
+            debug(f"Error setting position: {e}")
+            return False
 
     def get_track_length_in_millis(self):
         return self._track_length_in_millis
