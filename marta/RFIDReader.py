@@ -1,6 +1,8 @@
 from serial import Serial
 from threading import Thread, Event
 from logging import getLogger
+from time import sleep
+import traceback
 
 debug = getLogger('RFIDReader').debug
 
@@ -44,7 +46,11 @@ class RFIDReader(object):
 
         self._on_detection = on_detection
         self._serial_conn = Serial(port, baud_rate, timeout=timeout, rtscts=False, dsrdtr=False)
-        self._serial_conn.set_low_latency_mode(True)  # Force raw mode
+        try:
+            self._serial_conn.set_low_latency_mode(True)
+        except Exception as e:
+            # not supported on all serial drivers (e.g. the Pi's mini UART)
+            debug("low latency mode not available: " + str(e))
 
         self._read_rfid_thread = Thread(target=self._read_rfid)
         self._read_rfid_thread.daemon = True
@@ -54,34 +60,44 @@ class RFIDReader(object):
 
         while not self._stop_read_thread.is_set():
 
-            head = self._serial_conn.read()
-            debug(f"Read head: {head!r}")
-            
-            if len(head) == 0 and self._old_tag != "":
-                debug("No data read, clearing old tag")
-                self._on_detection(None)
-                self._old_tag = ""
+            # A garbled frame (half-placed tag, serial noise) must never kill
+            # this thread, otherwise the reader silently stops working.
+            try:
+                head = self._serial_conn.read()
 
-            elif head == RFIDReader.START_BYTE:
+                if len(head) == 0 and self._old_tag != "":
+                    debug("No data read, clearing old tag")
+                    self._on_detection(None)
+                    self._old_tag = ""
 
-                # actually the tag data is divided into 2 bytes version + 8 bytes tag + 2 bytes checksum
-                # I couldn't find out anything about the version differences, so I just ignored it.
-                tag = self._serial_conn.read(12)
-                debug(f"Read tag data: {tag!r}")
-                tag = tag.decode()
-                
-                tail = self._serial_conn.read()
-                debug(f"Read tail: {tail!r}")
-                
-                
-                if tail == RFIDReader.END_BYTE and self._old_tag != tag:
+                elif head == RFIDReader.START_BYTE:
 
-                    # the checksum is calculated by XORing the version and tag bytes
-                    calc_checksum = 0
-                    for i in range(0, 10, 2):
-                        calc_checksum ^= int(tag[i:i + 2], 16)
+                    # actually the tag data is divided into 2 bytes version + 8 bytes tag + 2 bytes checksum
+                    # I couldn't find out anything about the version differences, so I just ignored it.
+                    data = self._serial_conn.read(12)
+                    tail = self._serial_conn.read()
 
-                    if calc_checksum == int(tag[10:12], 16):
+                    if tail != RFIDReader.END_BYTE:
+                        debug(f"invalid frame (data={data!r}, tail={tail!r}), discarding")
+                        continue
+
+                    try:
+                        # the checksum is calculated by XORing the version and tag bytes
+                        # (int() accepts the raw bytes, so this also validates the hex digits)
+                        calc_checksum = 0
+                        for i in range(0, 10, 2):
+                            calc_checksum ^= int(data[i:i + 2], 16)
+                        checksum_ok = calc_checksum == int(data[10:12], 16)
+                        tag = data.decode("ascii")
+                    except (ValueError, UnicodeDecodeError):
+                        debug(f"invalid frame data: {data!r}, discarding")
+                        continue
+
+                    if not checksum_ok:
+                        debug(f"checksum mismatch: {data!r}, discarding")
+                        continue
+
+                    if self._old_tag != tag:
 
                         # make sure, on_detection is always called alternating (tag, None, tag, None, tag, ...
                         if self._old_tag != "":
@@ -89,6 +105,10 @@ class RFIDReader(object):
 
                         self._on_detection(tag)
                         self._old_tag = tag
+
+            except Exception:
+                debug("error in rfid read loop:\n" + traceback.format_exc())
+                sleep(0.5)
 
     def terminate(self):
         debug("rfid terminating.")
