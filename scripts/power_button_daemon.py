@@ -22,7 +22,7 @@ def is_marta_running():
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             if 'python' in proc.info['name'].lower():
-                cmdline = ' '.join(proc.info['cmdline'])
+                cmdline = ' '.join(proc.info['cmdline'] or [])
                 if 'Marta.py' in cmdline:
                     return proc.info['pid']
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):

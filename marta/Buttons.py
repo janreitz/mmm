@@ -88,8 +88,8 @@ def is_pushed(pin):
     """Check if a button is currently being pressed"""
     global _buttons
     if pin in _buttons:
-        # With pull_up=True, the button reads False when pressed
-        return not _buttons[pin].is_pressed
+        # gpiozero already accounts for pull_up: is_pressed is True while held
+        return _buttons[pin].is_pressed
     debug(f"Button {pin} not found in setup buttons")
     return False
 

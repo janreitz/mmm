@@ -14,7 +14,7 @@ ALBUM_INDICATOR_FILE = ".albumindicator"
 
 def prepare_albums(tag_path):
     possible_albums = sorted_aphanumeric(listdir(tag_path))
-    if len(possible_albums) is 0:
+    if len(possible_albums) == 0:
         raise Exception("empty tag directory: " + tag_path)
 
     albums = []
@@ -26,7 +26,7 @@ def prepare_albums(tag_path):
 
         if isdir(current):
             files = listdir(current)
-            if len(files) is 0:
+            if len(files) == 0:
                 raise Exception("empty album directory: " + current)
 
             if ALBUM_INDICATOR_FILE in files:
@@ -42,7 +42,7 @@ def prepare_albums(tag_path):
         i = albums.index(current_album_dir)
         albums = albums[i:] + albums[:i]
 
-    if len(albums) is 0:
+    if len(albums) == 0:
         albums.append(tag_path)
     elif at_least_one_file:
         raise Exception("directory and files mixed: " + tag_path)
@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     setup_stdout_logging()
 
-    if len(argv) is not 2:
+    if len(argv) != 2:
         debug("Error: Missing path argument.")
         exit(1)
 
