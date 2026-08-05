@@ -2,9 +2,11 @@
 Description=Marta Music Box
 # Start as early as possible, but after essential system services
 DefaultDependencies=no
-# With DefaultDependencies=no there is no implicit ordering at all, so at
-# least wait for local filesystems (audio dir, logs) to be mounted.
-After=local-fs.target
+# With DefaultDependencies=no there is no implicit ordering at all. Do NOT
+# order after local-fs.target: it waits for the /boot/firmware mount, which is
+# gated by udev's slow device processing (~25s on the Zero). Marta only needs
+# the root fs writable (logs) and the DAC modules loaded (modules-load.d).
+After=systemd-remount-fs.service systemd-modules-load.service
 Before=network-pre.target
 # Early in boot the sound/serial devices may not exist yet and marta exits
 # with an error until they do. Never give up restarting because of that.
