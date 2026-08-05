@@ -1,5 +1,4 @@
 from subprocess import Popen, PIPE, STDOUT
-import select
 from threading import Thread, Event
 from logging import getLogger
 
@@ -61,9 +60,10 @@ class MPG123Player(object):
             return
         
         if line.startswith(b'@I '):
-            # Handle metadata info messages
-            debug(f"metadata info message: %s", line)
-            self._program_responded.set()
+            # Informational metadata (ID3 etc.) emitted while a track is loading.
+            # Must not count as a command response: LP is only finished when @P
+            # arrives, and treating @I as the answer desyncs the whole protocol.
+            debug("metadata info message: %s", line)
             return
 
         if line.startswith(b'@E '):
@@ -101,7 +101,6 @@ class MPG123Player(object):
             return
 
         if line.startswith(b'@S '):
-            self._expecting_input = False
             sample_rate = int(line.split(b' ')[3]) / float(1000)
             self._track_length_in_millis = int(round(self._track_length_in_samples / sample_rate))
             debug("track length: %d", self._track_length_in_millis)
@@ -128,20 +127,18 @@ class MPG123Player(object):
             return
 
     def _read_sout(self):
-        mpg123_stdout_poll = select.poll()
-        mpg123_stdout_poll.register(self._mpg123_process.stdout, select.POLLIN)
-
+        # Do not mix select/poll on the fd with the buffered readline() here:
+        # readline() may pull several lines into the Python-side buffer at once
+        # and poll() would then block although lines are waiting to be handled.
+        # readline() blocks on its own and returns b'' once mpg123 dies.
         while True:
-            mpg123_stdout_poll.poll()
-
-            if self._mpg123_process.poll() is not None:
+            line = self._mpg123_process.stdout.readline()
+            if len(line) == 0:
                 break
 
-            line = self._mpg123_process.stdout.readline()
             self._mpg123_input(line)
 
         debug("mpg123 died")
-        mpg123_stdout_poll.unregister(self._mpg123_process.stdout)
 
         if self._on_error_callback is not None:
             self._on_error_callback()
@@ -205,10 +202,6 @@ class MPG123Player(object):
     def _get_position_in_samples(self):
         self._command('SAMPLE')
         return self._track_position_in_samples, self._track_length_in_samples
-
-    def get_position_in_millis(self):
-        current_pos, length = self._get_position_in_samples()
-        return int(round((float(current_pos) / length) * self._track_length_in_millis))
 
     def set_position_in_millis(self, position_in_millis):
         # Precondition checks
