@@ -2,7 +2,13 @@
 Description=Marta Music Box
 # Start as early as possible, but after essential system services
 DefaultDependencies=no
+# With DefaultDependencies=no there is no implicit ordering at all, so at
+# least wait for local filesystems (audio dir, logs) to be mounted.
+After=local-fs.target
 Before=network-pre.target
+# Early in boot the sound/serial devices may not exist yet and marta exits
+# with an error until they do. Never give up restarting because of that.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -10,6 +16,7 @@ Environment=MARTA=/home/jan/mmm
 ExecStart=/home/jan/mmm/marta/env/bin/python /home/jan/mmm/marta/Marta.py
 User=root
 Restart=on-failure
+RestartSec=2
 # Exit code 2 is the debug exit triggered by the interrupt tag: stay down.
 SuccessExitStatus=2
 
