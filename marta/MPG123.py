@@ -165,6 +165,9 @@ class MPG123Player(object):
     def is_track_playing(self):
         return self._current_state == MPG123Player.STATE_PLAYING
 
+    def is_track_stopped(self):
+        return self._current_state == MPG123Player.STATE_STOPPED
+
     def get_volume(self):
         return self._volume
 
@@ -284,23 +287,28 @@ class MPG123Player(object):
     def play_track(self):
         if self._current_state == MPG123Player.STATE_PLAYING:
             debug("already playing")
-            return
+            return False
 
         self.toggle()
+        return True
 
     def pause_track(self):
         if self._current_state == MPG123Player.STATE_PAUSED:
             debug("already paused")
-            return
+            return False
 
         self.toggle()
+        return True
 
     def stop_track(self):
+        # Returns whether a stop command was actually issued, so callers can
+        # know if a @P 0 stop event is still going to arrive.
         if self._current_state == MPG123Player.STATE_STOPPED:
             debug("already stopped")
-            return
+            return False
 
         self._command('S')
+        return True
 
     def terminate(self):
         debug("MPG123 terminating...")

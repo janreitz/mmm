@@ -69,7 +69,10 @@ class MusicHandler(MartaHandler):
         return MusicHandler.SHORT_TIMEOUT
 
     def save_state_and_stop(self):
-        self.marta.player.pause_track()
+        # The track may already have stopped on its own (song end racing with
+        # tag removal). Don't toggle pause then, it would start playback again.
+        if not self.marta.player.is_track_stopped():
+            self.marta.player.pause_track()
 
         debug("Saving state.")
         with open(self.current_song_dir + "/" + MusicHandler.SONG_STATE_FILE, 'w') as state_file:
@@ -81,8 +84,9 @@ class MusicHandler(MartaHandler):
         self.all_songs = None
         self.current_song_index = 0
 
-        self.expected_stop = True
-        self.marta.player.stop_track()
+        # Only expect a stop event if a stop command was actually sent,
+        # otherwise the flag would swallow the next real song-end event.
+        self.expected_stop = self.marta.player.stop_track()
 
     def load_state(self, tag):
         debug("Loading state.")
@@ -193,6 +197,10 @@ class MusicHandler(MartaHandler):
             debug("ignoring this event because stopping is expected")
             return
 
+        if self.all_songs is None:
+            debug("stop event without an active tag. ignoring")
+            return
+
         self.current_song_index = (self.current_song_index + 1) % len(self.all_songs)
         if len(self.all_songs) == 1:
             self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
@@ -274,8 +282,7 @@ class MusicHandler(MartaHandler):
             off = 1
 
         if off != 0:
-            self.expected_stop = True
-            self.marta.player.stop_track()
+            self.expected_stop = self.marta.player.stop_track()
             self.current_song_index = (self.current_song_index + off) % len(self.all_songs)
             self.marta.player.load_track_from_file(self.all_songs[self.current_song_index])
             self.marta.player.play_track()
