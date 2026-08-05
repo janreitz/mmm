@@ -97,6 +97,7 @@ class Marta(object):
         self.__message_queue.put([Marta.EVENT_INTERRUPT])
 
     def message_loop(self):
+        exit_val = 0
 
         current_handler = TAG_TO_HANDLER["default"].get_instance(self)
         max_mono_time = mtime() + current_handler.initialize()
@@ -143,8 +144,10 @@ class Marta(object):
                 tag = params[0]
 
                 if tag == Marta.INTERRUPT_TAG:
+                    # exit() must not be called here: SystemExit would skip
+                    # terminate() and leave GPIO/mpg123/LED threads dangling.
                     debug("Critical: Interrupt tag event!")
-                    exit(Marta.EXIT_DEBUG)
+                    exit_val = Marta.EXIT_DEBUG
                     break
 
                 if tag in TAG_TO_HANDLER:
@@ -175,6 +178,7 @@ class Marta(object):
                 max_mono_time = mtime() + return_val
 
         current_handler.uninitialize()
+        return exit_val
 
     def terminate(self):
         debug("Terminating!")
@@ -281,15 +285,13 @@ def main():
     
     """)
 
-    exit_val = 0
-
     debug("initializing")
     marta = Marta()
     signal(SIGINT, lambda s, f: marta.interrupt())
 
     debug("looping")
     try:
-        marta.message_loop()
+        exit_val = marta.message_loop()
     except Exception as e:
         debug("excepted: " + str(e))
         debug(traceback.format_exc())
