@@ -153,7 +153,7 @@ class Marta(object):
                 if tag in TAG_TO_HANDLER:
                     current_handler.uninitialize()
                     current_handler = TAG_TO_HANDLER[tag].get_instance(self)
-                    current_handler.initialize()
+                    max_mono_time = mtime() + current_handler.initialize()
 
             debug(Marta.EVENT_HUMAN_READABLE[event] + ": " + str(params))
             if event == Marta.EVENT_ROTATION:
