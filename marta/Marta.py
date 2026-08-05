@@ -69,9 +69,16 @@ class Marta(object):
         self.leds.startup()
         self.player.play_track()
 
-        # hacky because MPG123Player is async
-        while not self.player.is_track_playing():
+        # hacky because MPG123Player is async. Bounded wait: if playback never
+        # starts (e.g. the audio device is not usable yet), fail so systemd
+        # restarts us instead of hanging here forever with the RFID reader
+        # never coming up.
+        for _ in range(200):
+            if self.player.is_track_playing():
+                break
             sleep(0.05)
+        else:
+            raise Exception("startup sound did not start playing within 10s")
 
         # True = GPIO.HIGH = 1
         # False = GPIO.LOW = 0
