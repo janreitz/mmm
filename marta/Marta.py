@@ -12,7 +12,6 @@ import Buttons
 from MartaHandler import MartaHandler
 from LEDStrip import LEDStrip
 from MPG123 import MPG123Player
-from MPU import MPU
 from RFIDReader import RFIDReader
 from TagToHandler import TAG_TO_HANDLER
 

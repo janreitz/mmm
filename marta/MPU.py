@@ -103,7 +103,7 @@ class MPU(object):
     def get_average_rotation(self):
         xs = []
         ys = []
-        for i in range(TOTAL_READS):
+        for _ in range(TOTAL_READS):
             x, y = self.get_rotation()
             xs.append(x)
             ys.append(y)
