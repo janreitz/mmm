@@ -1,5 +1,6 @@
 from queue import Queue, Empty
 from math import cos, pi
+from time import monotonic as mtime
 
 from neopixel import *
 from threading import Thread
@@ -69,6 +70,7 @@ class LEDStrip(object):
                                         LEDStrip._LED_CHANNEL, LEDStrip._LED_STRIP)
         self._strip.begin()
         self._message_queue = Queue()
+        self._breathe_idle = False
 
         self._led_controller_thread = Thread(target=self._control_leds)
         self._led_controller_thread.daemon = True
@@ -77,7 +79,17 @@ class LEDStrip(object):
     def _control_leds(self):
         msg = None
         while True:
-            msg = self._message_queue.get(block=True, timeout=None) if msg is None else msg
+            if msg is None:
+                if self._breathe_idle and self._message_queue.empty():
+                    # idle: breathe until the next event arrives. Breathing is
+                    # a background state, not a queued animation, so finished
+                    # animations fall back into it automatically.
+                    try:
+                        self._breathe_animation()
+                    except SleepInterruptedException as sie:
+                        msg = sie.msg
+                else:
+                    msg = self._message_queue.get(block=True, timeout=None)
 
             event = msg[0]
 
@@ -114,7 +126,9 @@ class LEDStrip(object):
                     self._clear_all()
 
                 elif event == LEDStrip._EVENT_BREATHE:
-                    self._breathe_animation()
+                    # wake-up only: breathe() has already set the flag, the
+                    # idle fallback above starts the actual animation
+                    pass
 
                 msg = None
 
@@ -122,10 +136,23 @@ class LEDStrip(object):
                 msg = sie.msg
 
     def _sleep(self, timeout):
-        try:
-            raise SleepInterruptedException(self._message_queue.get(block=True, timeout=timeout))
-        except Empty:
-            pass
+        end = mtime() + timeout
+        while True:
+            remaining = end - mtime()
+            if remaining <= 0:
+                return
+            try:
+                msg = self._message_queue.get(block=True, timeout=remaining)
+            except Empty:
+                return
+
+            if msg[0] == LEDStrip._EVENT_BREATHE:
+                # not an interruption: breathe() only marks the idle state,
+                # the running animation finishes first and the idle fallback
+                # resumes breathing afterwards
+                continue
+
+            raise SleepInterruptedException(msg)
 
     def startup(self):
         self._message_queue.put([LEDStrip._EVENT_STARTUP])
@@ -146,9 +173,13 @@ class LEDStrip(object):
         self._message_queue.put([LEDStrip._EVENT_FADE_UP_AND_DOWN, color])
 
     def clear(self):
+        self._breathe_idle = False
         self._message_queue.put([LEDStrip._EVENT_CLEAR])
 
     def breathe(self):
+        # sticky: breathing runs whenever no other animation is active, until
+        # clear() ends the idle state. Never cuts a running animation short.
+        self._breathe_idle = True
         self._message_queue.put([LEDStrip._EVENT_BREATHE])
 
     def _clear_all(self):

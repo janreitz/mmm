@@ -136,6 +136,9 @@ class MusicHandler(MartaHandler):
         if current_position != 0:
             self.marta.player.set_position_in_millis(current_position)
 
+        # end the sticky idle breathing: the ring stays dark during playback
+        self.marta.leds.clear()
+
         if len(self.all_songs) == 1:
             self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
         else:
@@ -326,8 +329,8 @@ class MusicHandler(MartaHandler):
             self.button_red_green_event(pin, millis)
 
         if self.current_tag is None:
-            # the volume/pitch/brightness animation interrupted the idle
-            # breathing, so start it again
+            # make sure breathing is on: it resumes by itself once the
+            # volume/pitch/brightness animation has finished
             self.marta.leds.breathe()
             return MusicHandler.SHORT_TIMEOUT
         else:
