@@ -37,12 +37,12 @@ class LEDStrip(object):
     _EVENTS_HUMAN_READABLE = ["TERMINATE", "RAINBOW_DEMO", "VOLUME", "FADE_UP_AND_DOWN", "STARTUP", "SHUTDOWN", "SONG",
                               "CLEAR", "BREATHE"]
 
-    # idle breathing: dim white, full pulse period in seconds. The minimum
-    # level keeps the pulse out of the low 8-bit steps, where a single level
-    # change is a big relative brightness jump: 8->9 is ~12%, which reads as
-    # smooth, while 2->3 is 50% and visibly pops.
+    # idle breathing: dim white, full pulse period in seconds. Fractional
+    # levels are rendered by spatial dithering (a scattered subset of LEDs one
+    # level brighter), so the ring luminance moves in 1/28th-of-a-level steps
+    # and the floor can sit low without visible 8-bit pops.
     _BREATHE_MAX_LEVEL = 32
-    _BREATHE_MIN_LEVEL = 8
+    _BREATHE_MIN_LEVEL = 4
     _BREATHE_PERIOD = 5.0
     _BREATHE_FPS = 25
 
@@ -260,21 +260,33 @@ class LEDStrip(object):
         frames = int(round(LEDStrip._BREATHE_PERIOD * LEDStrip._BREATHE_FPS))
         lo = LEDStrip._BREATHE_MIN_LEVEL
         hi = LEDStrip._BREATHE_MAX_LEVEL
+        count = LEDStrip._LED_COUNT
+
+        # scattered LED ordering (11 is coprime with 28), so the "one level
+        # brighter" subset is spread around the ring instead of forming an arc
+        spread = sorted(range(count), key=lambda i: (i * 11) % count)
+
         frame = 0
-        last_value = None
+        last_shown = None
         while True:
             level = lo + (hi - lo) * (1 - cos(2 * pi * frame / frames)) / 2
-            value = int(round(level))
 
-            # no dithering: this strip visibly flickers when adjacent levels
-            # alternate quickly. Only latch the strip when the level actually
-            # changes.
-            if value != last_value:
-                color = Color(value, value, value)
-                for i in range(LEDStrip._LED_COUNT):
-                    self._strip.setPixelColor(i, color)
+            # spatial dithering: render the fractional level by driving some
+            # LEDs one level brighter. Each LED only steps occasionally (no
+            # temporal flicker), but the summed ring brightness moves in
+            # 1/28th-of-a-level increments.
+            base = int(level)
+            brighter = int(round((level - base) * count))
+            if brighter == count:
+                base += 1
+                brighter = 0
+
+            if (base, brighter) != last_shown:
+                for pos, led in enumerate(spread):
+                    value = base + 1 if pos < brighter else base
+                    self._strip.setPixelColor(led, Color(value, value, value))
                 self._strip.show()
-                last_value = value
+                last_shown = (base, brighter)
 
             frame = (frame + 1) % frames
             self._sleep(1.0 / LEDStrip._BREATHE_FPS)
