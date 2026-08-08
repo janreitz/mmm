@@ -1,4 +1,5 @@
 from queue import Queue, Empty
+from math import cos, pi
 
 from neopixel import *
 from threading import Thread
@@ -31,9 +32,18 @@ class LEDStrip(object):
     _EVENT_SHUTDOWN = 5
     _EVENT_SONG = 6
     _EVENT_CLEAR = 7
+    _EVENT_BREATHE = 8
 
     _EVENTS_HUMAN_READABLE = ["TERMINATE", "RAINBOW_DEMO", "VOLUME", "FADE_UP_AND_DOWN", "STARTUP", "SHUTDOWN", "SONG",
-                              "CLEAR"]
+                              "CLEAR", "BREATHE"]
+
+    # idle breathing: dim white, full pulse period in seconds. The minimum
+    # level keeps the pulse out of the lowest 8-bit steps, where a single
+    # level change is a huge relative brightness jump.
+    _BREATHE_MAX_LEVEL = 32
+    _BREATHE_MIN_LEVEL = 2
+    _BREATHE_PERIOD = 4.0
+    _BREATHE_FPS = 50
 
     RED = Color(255, 0, 0)
     GREEN = Color(0, 255, 0)
@@ -102,6 +112,9 @@ class LEDStrip(object):
                 elif event == LEDStrip._EVENT_CLEAR:
                     self._clear_all()
 
+                elif event == LEDStrip._EVENT_BREATHE:
+                    self._breathe_animation()
+
                 msg = None
 
             except SleepInterruptedException as sie:
@@ -133,6 +146,9 @@ class LEDStrip(object):
 
     def clear(self):
         self._message_queue.put([LEDStrip._EVENT_CLEAR])
+
+    def breathe(self):
+        self._message_queue.put([LEDStrip._EVENT_BREATHE])
 
     def _clear_all(self):
         for i in range(LEDStrip._LED_COUNT):
@@ -235,6 +251,32 @@ class LEDStrip(object):
 
     def get_brightness(self):
         return self._strip.getBrightness()
+
+    def _breathe_animation(self):
+        debug("breathe animation")
+        # slow dim white pulsing ("breathing") to show the box is awake and
+        # waiting. Runs until the next event interrupts it via _sleep.
+        frames = int(round(LEDStrip._BREATHE_PERIOD * LEDStrip._BREATHE_FPS))
+        lo = LEDStrip._BREATHE_MIN_LEVEL
+        hi = LEDStrip._BREATHE_MAX_LEVEL
+        frame = 0
+        carry = 0.0
+        while True:
+            level = lo + (hi - lo) * (1 - cos(2 * pi * frame / frames)) / 2
+
+            # temporal dithering: single 8-bit steps are clearly visible at
+            # low brightness, so spread the fractional part over consecutive
+            # frames and let the eye integrate the average
+            carry += level
+            value = int(carry)
+            carry -= value
+
+            color = Color(value, value, value)
+            for i in range(LEDStrip._LED_COUNT):
+                self._strip.setPixelColor(i, color)
+            self._strip.show()
+            frame = (frame + 1) % frames
+            self._sleep(1.0 / LEDStrip._BREATHE_FPS)
 
     def _rainbow_cycle_animation(self):
         while True:

@@ -71,8 +71,8 @@ class MusicHandler(MartaHandler):
 
     def initialize(self):
         debug("init")
-        # status LED on = powered but idle, as a reminder to turn the box off
-        Buttons.set_status_led(True)
+        # breathing ring = powered but idle, as a reminder to turn the box off
+        self.marta.leds.breathe()
         return MusicHandler.SHORT_TIMEOUT
 
     def save_state_and_stop(self):
@@ -127,7 +127,7 @@ class MusicHandler(MartaHandler):
         debug("tag removed.")
         self.marta.leds.fade_up_and_down(LEDStrip.RED)
         self.save_state_and_stop()
-        Buttons.set_status_led(True)
+        self.marta.leds.breathe()
         return MusicHandler.SHORT_TIMEOUT
 
     def rfid_music_tag_event(self, tag):
@@ -141,7 +141,6 @@ class MusicHandler(MartaHandler):
         else:
             self.marta.leds.song(self.current_song_index, len(self.all_songs))
         self.marta.player.play_track()
-        Buttons.set_status_led(False)
         return MusicHandler.LONG_TIMEOUT
 
     def rfid_tag_event(self, tag):
@@ -156,6 +155,7 @@ class MusicHandler(MartaHandler):
                     remove(MusicHandler.UNKNOWN_TAG_FILE)
 
                 self.marta.leds.fade_up_and_down(LEDStrip.RED)
+                self.marta.leds.breathe()
                 return MusicHandler.SHORT_TIMEOUT
 
             return self.rfid_removed_event()
@@ -169,6 +169,8 @@ class MusicHandler(MartaHandler):
                 unknown_tag_file.write(tag)
 
             self.marta.leds.fade_up_and_down(LEDStrip.ORANGE)
+            # still waiting for a usable tag
+            self.marta.leds.breathe()
             return MusicHandler.LONG_TIMEOUT
 
         return self.rfid_music_tag_event(tag)
@@ -324,12 +326,15 @@ class MusicHandler(MartaHandler):
             self.button_red_green_event(pin, millis)
 
         if self.current_tag is None:
+            # the volume/pitch/brightness animation interrupted the idle
+            # breathing, so start it again
+            self.marta.leds.breathe()
             return MusicHandler.SHORT_TIMEOUT
         else:
             return MusicHandler.LONG_TIMEOUT
 
     def uninitialize(self):
         debug("uninitialize")
-        Buttons.set_status_led(False)
+        self.marta.leds.clear()
         if self.current_tag is not None:
             self.save_state_and_stop()
