@@ -17,8 +17,10 @@ class MusicHandler(MartaHandler):
     PITCHES = [55, 70, 85, 100, 115, 130, 145, 160, 175, 190]
     DEFAULT_PITCH = 100
 
-    VOLUMES = [1, 2, 3, 5, 7, 9, 12, 15, 18, 22]
-    DEFAULT_VOLUME = 1
+    # Floor at 2: volume 1 is inaudible in practice and made the box look
+    # dead. 2 is the system sound volume, so it is known to be audible.
+    VOLUMES = [2, 3, 4, 5, 7, 9, 12, 15, 18, 22]
+    DEFAULT_VOLUME = 2
 
     BRIGHTNESSES = [0, 28, 56, 84, 112, 140, 168, 196, 224, 255]
     DEFAULT_BRIGHTNESS = 255
@@ -232,7 +234,13 @@ class MusicHandler(MartaHandler):
 
         debug("current value: " + str(current))
 
-        current = arr.index(current)
+        if current in arr:
+            current = arr.index(current)
+        else:
+            # e.g. a volume that is no longer part of the scale: snap to the
+            # nearest step instead of crashing the message loop
+            current = min(range(len(arr)), key=lambda i: abs(arr[i] - current))
+            debug("current value not on the scale, snapping to index " + str(current))
 
         if pin == Buttons.RED_BUTTON:
             new = current + 1
