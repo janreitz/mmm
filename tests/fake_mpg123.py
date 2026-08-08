@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Minimal emulation of `mpg123 --remote` for offline protocol testing."""
+
 import sys
 import time
 import threading

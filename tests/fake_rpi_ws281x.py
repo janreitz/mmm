@@ -3,6 +3,7 @@
 Records every rendered frame (timestamp + tuple of packed color values) in
 RENDERS so tests can assert on the animation output over time.
 """
+
 from time import monotonic
 
 WS2811_SUCCESS = 0
