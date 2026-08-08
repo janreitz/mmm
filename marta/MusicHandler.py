@@ -69,6 +69,8 @@ class MusicHandler(MartaHandler):
 
     def initialize(self):
         debug("init")
+        # status LED on = powered but idle, as a reminder to turn the box off
+        Buttons.set_status_led(True)
         return MusicHandler.SHORT_TIMEOUT
 
     def save_state_and_stop(self):
@@ -123,6 +125,7 @@ class MusicHandler(MartaHandler):
         debug("tag removed.")
         self.marta.leds.fade_up_and_down(LEDStrip.RED)
         self.save_state_and_stop()
+        Buttons.set_status_led(True)
         return MusicHandler.SHORT_TIMEOUT
 
     def rfid_music_tag_event(self, tag):
@@ -136,6 +139,7 @@ class MusicHandler(MartaHandler):
         else:
             self.marta.leds.song(self.current_song_index, len(self.all_songs))
         self.marta.player.play_track()
+        Buttons.set_status_led(False)
         return MusicHandler.LONG_TIMEOUT
 
     def rfid_tag_event(self, tag):
@@ -318,5 +322,6 @@ class MusicHandler(MartaHandler):
 
     def uninitialize(self):
         debug("uninitialize")
+        Buttons.set_status_led(False)
         if self.current_tag is not None:
             self.save_state_and_stop()
