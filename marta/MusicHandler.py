@@ -247,7 +247,7 @@ class MusicHandler(MartaHandler):
             current = min(range(len(arr)), key=lambda i: abs(arr[i] - current))
             debug("current value not on the scale, snapping to index " + str(current))
 
-        if pin == Buttons.RED_BUTTON:
+        if pin == Buttons.GREEN_BUTTON:
             new = current + 1
         else:
             new = current - 1
