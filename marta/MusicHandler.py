@@ -32,8 +32,11 @@ class MusicHandler(MartaHandler):
 
     SONG_STATE_FILE = ".songstate"
 
-    LONG_TIMEOUT = 20 * 60
-    SHORT_TIMEOUT = 5 * 60
+    # The box no longer exits on idle: the battery lasts long enough, and a
+    # silently exited marta made the box look dead. The status LED shows the
+    # idle state instead, and the power button turns the box off.
+    LONG_TIMEOUT = MartaHandler.TIMEOUT_NEVER
+    SHORT_TIMEOUT = MartaHandler.TIMEOUT_NEVER
 
     LONG_CLICK_THRESHOLD = 1500
 

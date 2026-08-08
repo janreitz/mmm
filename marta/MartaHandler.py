@@ -1,6 +1,10 @@
 class MartaHandler(object):
     EVENT_HANDLER_DONE = -1
 
+    # Practically infinite (10 years): keeps the normal "mtime() + timeout"
+    # arithmetic working while staying below Queue.get()'s timeout limit.
+    TIMEOUT_NEVER = 10 * 365 * 24 * 60 * 60
+
     def __init__(self, marta):
         self.marta = marta
 
