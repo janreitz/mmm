@@ -167,11 +167,8 @@ when the entry point is final — one unit change, not two. Remember the
 
 ## Stage 2 — typed events, config, dependency injection (same threading model)
 
-**Status: shipped** (`Stage 2: typed events, config, dependency injection`,
-`Switch units to python -m marta and move the venv out of marta/`). See
-"What actually shipped" below for where implementation deviated from this
-plan, and "Deploy checklist" for the on-device verification, which is the
-part of the stage-2 gate that still needs to happen on real hardware.
+**Status: shipped and verified on-device (2026-08-09).** See "What actually
+shipped" below for where implementation deviated from this plan.
 
 Goal: the code becomes explicit and injectable while keeping the proven
 thread/queue engine. No asyncio, no `MusicHandler` split, no player changes.
@@ -309,19 +306,19 @@ today. (TOML file support is a later nicety, not stage 2.)
   left as-is rather than silently deleted; worth a decision whether to
   delete or repair it.
 
-### Verification gate for stage 2
+### Verification gate for stage 2 — all done, stage 2 is complete
 
 1. ~~`make check` green~~ **done** (ruff, mypy, pytest incl. the three
-   hardware fakes plus the new `test_loop.py`).
-2. **On-device checklist — not yet run, needs the real box**: boot to
-   jingle, breathe on idle, tag place/resume/remove/save, volume buttons +
-   bar animation, long-press album switch, rainbow tag in and out, interrupt
-   tag → clean exit 2 + no restart, power button → graceful shutdown (this
-   one specifically exercises the `is_marta_running()` fix above).
-3. ~~Unit switched to `python -m marta`~~ **done in the unit files**; the Pi
-   deploy itself (recreating the venv at the new location, installing the
-   package, reloading + verifying both units) is part of the same
-   not-yet-run on-device step.
+   hardware fakes plus `test_loop.py`).
+2. ~~On-device checklist~~ **done** — clean restart, jingle played, confirmed
+   working on the real box (2026-08-09). One deploy-only issue surfaced and
+   was fixed along the way: the fresh venv at the new location had no
+   gpiozero pin-factory backend, so it fell back to gpiozero's legacy
+   sysfs-based `NativeFactory`, which doesn't work on current Raspberry Pi
+   OS kernels (`OSError` exporting `/sys/class/gpio/gpio5`). Fixed by adding
+   `lgpio` as an explicit ARM-gated dependency (confirmed via the old venv's
+   `pip list` that lgpio was what actually backed gpiozero there).
+3. ~~Unit switched to `python -m marta`~~ **done**, deployed and verified.
 
 ## Risks and rollback
 
