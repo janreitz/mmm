@@ -133,6 +133,9 @@ transient overlays that never outlive their state.
 
 ## Stage 1 — packaging and tooling (zero behavior change)
 
+**Status: shipped** (`Add redesign doc and stage 1...`, `Make the offline
+tests pytest-discoverable`).
+
 Goal: the repo becomes a normal Python project; nothing observable changes on
 the box.
 
@@ -163,6 +166,12 @@ when the entry point is final — one unit change, not two. Remember the
 `systemctl cat` after every unit deploy.
 
 ## Stage 2 — typed events, config, dependency injection (same threading model)
+
+**Status: shipped** (`Stage 2: typed events, config, dependency injection`,
+`Switch units to python -m marta and move the venv out of marta/`). See
+"What actually shipped" below for where implementation deviated from this
+plan, and "Deploy checklist" for the on-device verification, which is the
+part of the stage-2 gate that still needs to happen on real hardware.
 
 Goal: the code becomes explicit and injectable while keeping the proven
 thread/queue engine. No asyncio, no `MusicHandler` split, no player changes.
@@ -237,32 +246,82 @@ today. (TOML file support is a later nicety, not stage 2.)
   `TAG_TO_DIR` dict becomes state owned by the (future) library object — in
   stage 2 it merely stops being import-time global.
 
-### File map after stage 2
+### File map after stage 2 (as shipped)
 
-| current                | after stage 2                      |
+| before stage 2         | after stage 2                      |
 |------------------------|------------------------------------|
-| `Marta.py`             | `__main__.py` + `loop.py`          |
-| `MartaHandler.py`      | `handler.py` (+ result types)      |
-| `MusicHandler.py`      | `music_handler.py` (internals otherwise untouched — split is stage 3) |
-| `MPG123.py`            | `player.py` (rename only)          |
-| `RFIDReader.py`        | `rfid.py` (rename only)            |
-| `Buttons.py`           | `buttons.py` (class-ified)         |
-| `LEDStrip.py`          | `ledstrip.py` (rename only)        |
-| `TagToDir.py`          | `tag_to_dir.py` (exit→raise only)  |
-| `neopixel.py`          | unchanged (revisit in stage 4)     |
-| `SetupLogging.py`, `Util.py` | `logging_setup.py`, `util.py` |
-| —                      | `events.py`, `config.py`           |
+| `Marta.py`             | `loop.py` (`Marta` class) + `__main__.py` (composition root) |
+| `MartaHandler.py`      | `handler.py` (`Handler` + `Timeout`/`Never`/`Done`) |
+| `MusicHandler.py`      | `music_handler.py` (business logic bodies unchanged; construction/config plumbing rewired — see deviations) |
+| `MPG123.py`            | `player.py` (protocol logic untouched; `post` callable + explicit `mpg123_binary` arg) |
+| `RFIDReader.py`        | `rfid.py` (frame parsing untouched; `post` callable, constructs typed events itself) |
+| `Buttons.py`           | `buttons.py` (class-ified: `ButtonInput`) |
+| `LEDStrip.py`          | `ledstrip.py` (untouched but for the import line) |
+| `TagToDir.py`          | `tag_to_dir.py` (the one `exit(1)` in library code → raise) |
+| `ButtonLightHandler.py`, `RainbowHandler.py` | `button_light_handler.py`, `rainbow_handler.py` (constructor injection, singleton dropped) |
+| `MPU.py`, `SetupLogging.py`, `Util.py` | `mpu.py`, `logging_setup.py`, `util.py` (renamed, untouched otherwise) |
+| `TagToHandler.py`      | **deleted** — mapping now built in `__main__.py`'s `build_marta()` from `Config`'s tag fields |
+| `neopixel.py`          | unchanged (revisit in stage 4) |
+| —                      | `events.py`, `config.py` (new) |
+
+### What actually shipped differently from the plan above
+
+- **Imports are `from marta.x import y` (absolute, package-qualified), not
+  relative (`from .x import y`)**. Relative imports would break every
+  module's standalone `python -m marta.x` demo entry point (`if __name__ ==
+  "__main__"` with a relative import fails outside package context);
+  absolute imports work both via `-m marta` and standalone, relying on the
+  stage-1 editable install (`pip install -e .`) making `marta` resolve from
+  anywhere. This is what finally let stage 1's `sys.path.insert` shim in
+  `__main__.py` go away, as promised.
+- **`Config` ended up narrower than "pins" implied.** Button GPIO pins stay
+  baked into `events.Button`'s enum values (matching this doc's own
+  `events.py` sketch above) rather than being duplicated in `Config`; LED
+  strip hardware parameters (pin, DMA channel, frequency...) stay in
+  `ledstrip.py`. Both are fixed by the PCB, not meaningfully "deployment
+  config" — only paths, tunable scales, breathe timing, special tag IDs,
+  the mpg123 binary and serial port settings ended up in `Config`.
+- **`music_handler.py` needed more than construction-plumbing changes** to
+  actually fix the "`$MARTA` read at import time" complaint from this doc's
+  Why section: `SONG_DIR`/`UNKNOWN_TAG_FILE`/the volume-pitch-brightness
+  scales moved to injected `Config` fields (matching what this doc's Config
+  section explicitly listed), not just the `player`/`leds` dependencies.
+  The actual playback/album/volume *logic* — every method body — is
+  unchanged.
+- **`SHORT_TIMEOUT`/`LONG_TIMEOUT` are gone, not renamed.** An earlier
+  session already made both equal (`TIMEOUT_NEVER`) to stop the box exiting
+  on idle; since they'd become the same value under two names, call sites
+  now just `return Never()` directly rather than carrying forward two names
+  for one meaning.
+- **Added `tests/test_loop.py`**, not in the original stage-2 scope, because
+  the message-loop rewrite (the `if/elif` → two-phase `match` translation)
+  was the highest-risk part of this stage and had zero coverage otherwise.
+  It runs against fake handlers, no hardware — and caught a bug in its own
+  first draft (a test-timing mistake, not a `loop.py` bug) before catching
+  anything real.
+- **`power_button_daemon.py` needed a fix, not just the units.** Its
+  `is_marta_running()` matched `'Marta.py'` as a cmdline substring; under
+  `python -m marta` that string never appears, which would have silently
+  broken graceful shutdown. Now matches the exact `-m marta` argv tail.
+- **`scripts/marta_startup.sh` is now stale** (references the deleted
+  `Marta.py`, and encodes the old idle-exit-triggers-shutdown behavior this
+  project moved away from). Nothing in the systemd-based deploy invokes it —
+  left as-is rather than silently deleted; worth a decision whether to
+  delete or repair it.
 
 ### Verification gate for stage 2
 
-1. `make check` green (ruff, mypy-permissive, all pytest suites incl. the
-   three hardware fakes).
-2. On-device checklist: boot to jingle, breathe on idle, tag place/resume/
-   remove/save, volume buttons + bar animation, long-press album switch,
-   rainbow tag in and out, interrupt tag → clean exit 2 + no restart,
-   power button → graceful shutdown.
-3. Unit switched to `python -m marta`, verified via `systemctl cat` and one
-   full power-cycle.
+1. ~~`make check` green~~ **done** (ruff, mypy, pytest incl. the three
+   hardware fakes plus the new `test_loop.py`).
+2. **On-device checklist — not yet run, needs the real box**: boot to
+   jingle, breathe on idle, tag place/resume/remove/save, volume buttons +
+   bar animation, long-press album switch, rainbow tag in and out, interrupt
+   tag → clean exit 2 + no restart, power button → graceful shutdown (this
+   one specifically exercises the `is_marta_running()` fix above).
+3. ~~Unit switched to `python -m marta`~~ **done in the unit files**; the Pi
+   deploy itself (recreating the venv at the new location, installing the
+   package, reloading + verifying both units) is part of the same
+   not-yet-run on-device step.
 
 ## Risks and rollback
 
@@ -275,20 +334,16 @@ today. (TOML file support is a later nicety, not stage 2.)
 - Renames make `git blame` noisier; accepted cost, done in a dedicated
   commit so content changes stay reviewable.
 
-## Open questions
+## Open questions (resolved)
 
-1. **Venv location on the Pi**: it currently lives *inside* the package dir
-   (`/home/jan/mmm/marta/env`). Packaging wants it out (`/home/jan/mmm/env`).
-   Moving it means one coordinated unit edit + `--exclude` update in the
-   rsync ritual. Do it during stage 1, or defer to the ExecStart switch at
-   the end of stage 2?
-2. **Rename appetite**: the file map above renames modules to snake_case in
-   stage 2. Alternative: keep legacy names until stage 3 splits things
-   anyway. Preference?
-3. **`rpi-ws281x` from PyPI vs the vendored `neopixel.py`**: switching the
-   shim for the maintained binding is arguably stage-1 hygiene, but it
-   touches hardware behavior (the one thing stage 1 promises not to do).
-   Proposal: leave vendored until stage 4, list the dependency as-is.
-4. **Power daemon**: include it in the package (`marta.powerbutton`) or leave
-   it a standalone script? Leaning standalone (it must survive marta being
-   broken), but packaging its deps together would be tidier.
+1. **Venv location**: deferred to the end of stage 2 as recommended, bundled
+   with the `ExecStart` switch — one coordinated unit edit, done. The Pi-side
+   move (recreate `/home/jan/mmm/env`, `pip install` the package into it)
+   still needs to happen as part of the not-yet-run deploy.
+2. **Rename appetite**: renamed now (snake_case), as recommended.
+3. **`rpi-ws281x` from PyPI vs vendored `neopixel.py`**: left vendored, as
+   proposed. Revisit in stage 4.
+4. **Power daemon**: left standalone, as recommended. `power_button_daemon.py`
+   did need a small fix this stage regardless (see deviations above) — its
+   independence from the package didn't mean independence from the rename's
+   consequences.
