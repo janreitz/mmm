@@ -1,15 +1,11 @@
-import os
 import sys
 import time
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "marta"))
 
 import fake_rpi_ws281x
 
 sys.modules["_rpi_ws281x"] = fake_rpi_ws281x
 
-from LEDStrip import LEDStrip
+from marta.ledstrip import LEDStrip
 
 
 def is_breathing_frame(frame):

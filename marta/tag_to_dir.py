@@ -3,7 +3,7 @@ from os import listdir
 from os.path import isdir
 from logging import getLogger
 from re import compile, match
-from Util import sorted_aphanumeric
+from marta.util import sorted_aphanumeric
 
 TAG_TO_DIR = {}
 
@@ -54,8 +54,7 @@ def prepare(audio_path):
     debug("Preparing audio directory: " + audio_path)
     
     if not isdir(audio_path):
-        debug("not a directory: " + audio_path)
-        exit(1)
+        raise Exception("not a directory: " + audio_path)
 
     if not isdir(audio_path + "/system"):
         raise Exception("missing system directory, expected at: " + os.path.join(audio_path, "system"))
@@ -85,7 +84,7 @@ def prepare(audio_path):
 
 
 if __name__ == "__main__":
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
     from sys import argv
 
     setup_stdout_logging()

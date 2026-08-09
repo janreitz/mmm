@@ -2,9 +2,13 @@ from serial import Serial
 from threading import Thread, Event
 from logging import getLogger
 from time import sleep
+from typing import Callable
 import traceback
 
-debug = getLogger('RFIDReader').debug
+from marta.events import Event as MartaEvent
+from marta.events import TagPlaced, TagRemoved
+
+debug = getLogger("RFIDReader").debug
 
 
 #  RDM6300 RFID tag data structure
@@ -29,6 +33,7 @@ debug = getLogger('RFIDReader').debug
 #    |
 #    +--> 1 byte header is always 0x2
 
+
 class RFIDReader(object):
     DEFAULT_BAUD_RATE = 9600
 
@@ -40,11 +45,17 @@ class RFIDReader(object):
 
     END_BYTE = b"\x03"
 
-    def __init__(self, on_detection, port=DEFAULT_PORT, baud_rate=DEFAULT_BAUD_RATE, timeout=DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        post: Callable[[MartaEvent], None],
+        port=DEFAULT_PORT,
+        baud_rate=DEFAULT_BAUD_RATE,
+        timeout=DEFAULT_TIMEOUT,
+    ):
         self._old_tag = ""
         self._stop_read_thread = Event()
 
-        self._on_detection = on_detection
+        self._post = post
         self._serial_conn = Serial(port, baud_rate, timeout=timeout, rtscts=False, dsrdtr=False)
         try:
             self._serial_conn.set_low_latency_mode(True)
@@ -59,7 +70,6 @@ class RFIDReader(object):
     def _read_rfid(self):
 
         while not self._stop_read_thread.is_set():
-
             # A garbled frame (half-placed tag, serial noise) must never kill
             # this thread, otherwise the reader silently stops working.
             try:
@@ -67,11 +77,10 @@ class RFIDReader(object):
 
                 if len(head) == 0 and self._old_tag != "":
                     debug("No data read, clearing old tag")
-                    self._on_detection(None)
+                    self._post(TagRemoved())
                     self._old_tag = ""
 
                 elif head == RFIDReader.START_BYTE:
-
                     # actually the tag data is divided into 2 bytes version + 8 bytes tag + 2 bytes checksum
                     # I couldn't find out anything about the version differences, so I just ignored it.
                     data = self._serial_conn.read(12)
@@ -86,7 +95,7 @@ class RFIDReader(object):
                         # (int() accepts the raw bytes, so this also validates the hex digits)
                         calc_checksum = 0
                         for i in range(0, 10, 2):
-                            calc_checksum ^= int(data[i:i + 2], 16)
+                            calc_checksum ^= int(data[i : i + 2], 16)
                         checksum_ok = calc_checksum == int(data[10:12], 16)
                         tag = data.decode("ascii")
                     except (ValueError, UnicodeDecodeError):
@@ -98,12 +107,11 @@ class RFIDReader(object):
                         continue
 
                     if self._old_tag != tag:
-
-                        # make sure, on_detection is always called alternating (tag, None, tag, None, tag, ...
+                        # make sure detections always alternate: placed, removed, placed, removed, ...
                         if self._old_tag != "":
-                            self._on_detection(None)
+                            self._post(TagRemoved())
 
-                        self._on_detection(tag)
+                        self._post(TagPlaced(tag))
                         self._old_tag = tag
 
             except Exception:
@@ -125,14 +133,16 @@ class RFIDReader(object):
 
 ################################################################
 
+
 def main():
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
+
     setup_stdout_logging()
 
     debug("place tags on the reader!")
     debug("ENTER or CTRL + C to quit")
 
-    reader = RFIDReader(lambda tag: debug("tag: " + str(tag)))
+    reader = RFIDReader(post=lambda event: debug("%r", event))
 
     try:
         input()

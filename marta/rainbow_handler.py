@@ -1,36 +1,28 @@
 from logging import getLogger
 
-from MartaHandler import MartaHandler
+from marta.ledstrip import LEDStrip
+from marta.handler import Handler, Timeout, Done
 
-debug = getLogger('RnbwHndler').debug
+debug = getLogger("RnbwHndler").debug
 
 
-class RainbowHandler(MartaHandler):
+class RainbowHandler(Handler):
     TIMEOUT = 60
 
-    #################
-    # SINGLETON
+    def __init__(self, leds: LEDStrip):
+        self.leds = leds
 
-    instance = None
-
-    @staticmethod
-    def get_instance(marta):
-        if RainbowHandler.instance is None:
-            RainbowHandler.instance = RainbowHandler(marta)
-        return RainbowHandler.instance
-
-    #################
-
-    def rfid_tag_event(self, tag):
+    def rfid_tag_event(self, tag: str | None):
         debug("tag: " + str(tag))
         if tag is None:
-            return MartaHandler.EVENT_HANDLER_DONE
+            return Done()
+        return None
 
     def initialize(self):
         debug("init!!!")
-        self.marta.leds.rainbow_demo()
-        return RainbowHandler.TIMEOUT
+        self.leds.rainbow_demo()
+        return Timeout(RainbowHandler.TIMEOUT)
 
     def uninitialize(self):
-        self.marta.leds.clear()
+        self.leds.clear()
         debug("uninit!!!")

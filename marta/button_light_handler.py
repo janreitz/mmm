@@ -1,50 +1,41 @@
 from logging import getLogger
 
-from LEDStrip import LEDStrip
-from MartaHandler import MartaHandler
-import Buttons
+from marta.ledstrip import LEDStrip
+from marta.handler import Handler, Timeout, Done
+from marta.events import Button
 
-debug = getLogger('BtnLgtHdlr').debug
+debug = getLogger("BtnLgtHdlr").debug
 
 
-class ButtonLightHandler(MartaHandler):
+class ButtonLightHandler(Handler):
     TIMEOUT = 60
 
-    #################
-    # SINGLETON
+    def __init__(self, leds: LEDStrip):
+        self.leds = leds
 
-    instance = None
+    def button_event(self, button: Button, millis: int):
+        if button == Button.BLUE:
+            self.leds.fade_up_and_down(LEDStrip.BLUE)
+        elif button == Button.RED:
+            self.leds.fade_up_and_down(LEDStrip.RED)
+        elif button == Button.GREEN:
+            self.leds.fade_up_and_down(LEDStrip.GREEN)
+        elif button == Button.YELLOW:
+            self.leds.fade_up_and_down(LEDStrip.YELLOW)
 
-    @staticmethod
-    def get_instance(marta):
-        if ButtonLightHandler.instance is None:
-            ButtonLightHandler.instance = ButtonLightHandler(marta)
-        return ButtonLightHandler.instance
+        return Timeout(ButtonLightHandler.TIMEOUT)
 
-    #################
-
-    def button_event(self, pin, millis):
-        if pin == Buttons.BLUE_BUTTON:
-            self.marta.leds.fade_up_and_down(LEDStrip.BLUE)
-        elif pin == Buttons.RED_BUTTON:
-            self.marta.leds.fade_up_and_down(LEDStrip.RED)
-        elif pin == Buttons.GREEN_BUTTON:
-            self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
-        elif pin == Buttons.YELLOW_BUTTON:
-            self.marta.leds.fade_up_and_down(LEDStrip.YELLOW)
-
-        return ButtonLightHandler.TIMEOUT
-
-    def rfid_tag_event(self, tag):
+    def rfid_tag_event(self, tag: str | None):
         debug("tag: " + str(tag))
         if tag is None:
-            return MartaHandler.EVENT_HANDLER_DONE
+            return Done()
+        return None
 
     def initialize(self):
-        self.marta.leds.fade_up_and_down(LEDStrip.WHITE)
+        self.leds.fade_up_and_down(LEDStrip.WHITE)
         debug("init!!!")
-        return ButtonLightHandler.TIMEOUT
+        return Timeout(ButtonLightHandler.TIMEOUT)
 
     def uninitialize(self):
-        self.marta.leds.fade_up_and_down(LEDStrip.WHITE)
+        self.leds.fade_up_and_down(LEDStrip.WHITE)
         debug("uninit!!!")

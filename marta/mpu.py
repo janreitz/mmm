@@ -129,7 +129,7 @@ class MPU(object):
 ################################################################
 
 def main():
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
     setup_stdout_logging()
 
     debug("tilt the device!")

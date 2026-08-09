@@ -1,22 +1,18 @@
 import os
-import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "marta"))
-
-from SetupLogging import setup_stdout_logging
-
-import MPG123
+from marta.logging_setup import setup_stdout_logging
+from marta.player import MPG123Player
+from marta.events import PlaybackStopped, PlayerDied
 
 
 def test_mpg123_player():
     setup_stdout_logging()
-    MPG123.MPG123Player._MPG123_BINARY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_mpg123.py")
+    fake_binary = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_mpg123.py")
 
-    stops = []
-    errors = []
+    events = []
 
-    player = MPG123.MPG123Player(lambda: stops.append(1), lambda: errors.append(1), volume=2)
+    player = MPG123Player(fake_binary, post=events.append, volume=2)
 
     assert player.load_track_from_file("/fake/track.mp3") is True, "load failed"
     assert player._track_length_in_millis == 10000, player._track_length_in_millis
@@ -40,8 +36,11 @@ def test_mpg123_player():
     time.sleep(0.2)
     assert player.is_track_stopped()
     assert player.stop_track() is False, "second stop should be a no-op"
-    assert stops, "stop callback did not fire"
-    assert not errors, "unexpected error callback"
+
+    stops = [e for e in events if isinstance(e, PlaybackStopped)]
+    errors = [e for e in events if isinstance(e, PlayerDied)]
+    assert stops, "stop event did not fire"
+    assert not errors, "unexpected error event"
 
     player.terminate()
 

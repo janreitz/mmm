@@ -39,20 +39,14 @@ ignore = ["E722", "E731"]
 
 [tool.ruff.lint.per-file-ignores]
 # star import from the vendored neopixel shim
-"marta/LEDStrip.py" = ["F403", "F405"]
-# sys.path shims before imports, removed with the stage-2 import rewrite
-"marta/__main__.py" = ["E402"]
+"marta/ledstrip.py" = ["F403", "F405"]
 "tests/*" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
-# Permissive baseline: the legacy flat imports ("import Buttons") resolve to Any,
-# so modules are checked in isolation. The stage-2 package-relative import
-# rewrite makes cross-module checking light up without further config.
 ignore_missing_imports = true
-# var-annotated: module-level dict globals (Buttons._buttons, TagToDir.TAG_TO_DIR)
-# that stage 2 replaces with injected state entirely; annotating them now is
-# effort spent on code about to be deleted.
+# var-annotated: tag_to_dir.TAG_TO_DIR is still a module-level dict global;
+# stage 3 gives it a proper owner (the future library object).
 disable_error_code = ["var-annotated"]
 exclude = ["^env/", "^marta/neopixel\\.py$"]
 
@@ -60,5 +54,14 @@ exclude = ["^env/", "^marta/neopixel\\.py$"]
 # star-imports everything from the vendored neopixel.py shim (replaced in
 # stage 4); mypy can't see names through `from neopixel import *` from an
 # excluded module, so this file is checked only by ruff until then.
-module = "marta.LEDStrip"
+module = "marta.ledstrip"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+# Several methods here rely on a runtime invariant the types don't capture
+# yet: current_song_dir/all_songs are only used when current_tag is not None
+# (guaranteed by button_event's caller, not by the types). Modeling that
+# properly means real states instead of loosely-coupled Optional fields -
+# that's the stage-3 library/state-machine split, not stage 2's job.
+module = "marta.music_handler"
 ignore_errors = true

@@ -1,125 +1,79 @@
-# system
-from logging import handlers, getLogger, DEBUG, Formatter, StreamHandler
-from sys import stdout, argv
+"""The Marta class: the message loop and its handler-switching/deadline
+rules, unchanged in behavior from the legacy Marta.py. Construction of the
+hardware adapters and handlers - previously mixed into this class's
+constructor alongside the startup jingle - now happens in __main__.py's
+composition root; this class receives everything already built.
+"""
+
+from logging import getLogger
 from queue import Queue, Empty
-from time import sleep, strftime
-from signal import signal, SIGINT
-from os import environ
-from time import monotonic as mtime
-import traceback
+from time import monotonic as mtime, sleep
 
-import Buttons
-from MartaHandler import MartaHandler
-from LEDStrip import LEDStrip
-from MPG123 import MPG123Player
-from RFIDReader import RFIDReader
-from TagToHandler import TAG_TO_HANDLER
+from marta.buttons import ButtonInput
+from marta.config import Config
+from marta.events import Event, Interrupted, PlayerDied, TagPlaced, TagRemoved, ButtonPressed, PlaybackStopped
+from marta.handler import Handler, Timeout, Never, Done
+from marta.ledstrip import LEDStrip
+from marta.player import MPG123Player
+from marta.rfid import RFIDReader
 
-debug = getLogger('     Marta').debug
+debug = getLogger("     Marta").debug
 
-MARTA_BASE_DIR = environ["MARTA"]
+# The debug/interrupt-tag exit code: must match systemd/marta.service's
+# SuccessExitStatus=2, which tells the unit not to restart on this exit.
+EXIT_CODE_DEBUG = 2
 
 
-class Marta(object):
-    ################
-    # EVENTS
-    EVENT_SONG_STOPPED = 0
-    EVENT_RFID_TAG = 1
-    EVENT_BUTTON = 2
-    EVENT_MPG123_ERROR = 3
-    EVENT_ROTATION = 4
-    EVENT_INTERRUPT = 5
-
-    EXIT_DEBUG = 2
-
-    EVENT_HUMAN_READABLE = [
-        "EVENT_SONG_STOPPED",
-        "EVENT_TAG",
-        "EVENT_BUTTON",
-        "EVENT_MPG123_ERROR",
-        "EVENT_ROTATION",
-        "EVENT_INTERRUPT"
-    ]
-
-    ################
-    # SPECIAL TAGS
-
-    INTERRUPT_TAG = "5600C7AC4B76"
-
-    ################
-    # AUDIO
-
-    START_SOUND_PATH = MARTA_BASE_DIR + "/audio/system/startup.mp3"
-    SHUTDOWN_SOUND_PATH = MARTA_BASE_DIR + "/audio/system/shutdown.mp3"
-    SYSTEM_SOUND_VOLUME = 2
-
-    def __init__(self):
-        self.__message_queue = Queue()
-        Buttons.setup_gpio(lambda pin, millis: self.__message_queue.put([Marta.EVENT_BUTTON, pin, millis]))
-
-        self.player = MPG123Player(lambda: self.__message_queue.put([Marta.EVENT_SONG_STOPPED]),
-                                   lambda: self.__message_queue.put([Marta.EVENT_MPG123_ERROR]),
-                                   volume=Marta.SYSTEM_SOUND_VOLUME)
-
-        self.leds = LEDStrip()
-
-        debug(f"Loading startup sound from: {Marta.START_SOUND_PATH}")
-        self.player.load_track_from_file(Marta.START_SOUND_PATH)
-        self.leds.startup()
-        self.player.play_track()
-
-        # hacky because MPG123Player is async. Bounded wait: if playback never
-        # starts (e.g. the audio device is not usable yet), fail so systemd
-        # restarts us instead of hanging here forever with the RFID reader
-        # never coming up.
-        for _ in range(200):
-            if self.player.is_track_playing():
-                break
-            sleep(0.05)
-        else:
-            raise Exception("startup sound did not start playing within 10s")
-
-        # True = GPIO.HIGH = 1
-        # False = GPIO.LOW = 0
-        g = True
-        while self.player.is_track_playing():
-            Buttons.set_status_led(g)
-            sleep(0.2)
-            g = not g
-
-        Buttons.set_status_led(0)
-
-        # Empty q after short period of time (player stop event and button pushes)
-        sleep(0.1)
-        while not self.__message_queue.empty():
-            self.__message_queue.get(block=False)
-
-        # self.mpu = MPU(period=1, threshold=5,
-        #                rotation_receiver=lambda x, y: self.__message_queue.put([Marta.EVENT_ROTATION, x, y]))
-
-        self.rfid_reader = RFIDReader(lambda tag: self.__message_queue.put([Marta.EVENT_RFID_TAG, tag]))
+class Marta:
+    def __init__(
+        self,
+        message_queue: "Queue[Event]",
+        config: Config,
+        player: MPG123Player,
+        leds: LEDStrip,
+        button_input: ButtonInput,
+        rfid_reader: RFIDReader,
+        default_handler: Handler,
+        handlers_by_tag: dict[str, Handler],
+    ):
+        self._message_queue = message_queue
+        self._config = config
+        self._player = player
+        self._leds = leds
+        self._button_input = button_input
+        self._rfid_reader = rfid_reader
+        self._default_handler = default_handler
+        self._handlers_by_tag = handlers_by_tag
 
     def interrupt(self):
-        self.__message_queue.put([Marta.EVENT_INTERRUPT])
+        self._message_queue.put(Interrupted())
 
-    def message_loop(self):
+    @staticmethod
+    def _deadline_from(result: Timeout | Never) -> float | None:
+        if isinstance(result, Never):
+            return None
+        if isinstance(result, Timeout):
+            return mtime() + result.seconds
+        raise TypeError(f"handler must return Timeout or Never here, got {result!r}")
+
+    def message_loop(self) -> int:
         exit_val = 0
 
-        current_handler = TAG_TO_HANDLER["default"].get_instance(self)
-        max_mono_time = mtime() + current_handler.initialize()
+        current_handler = self._default_handler
+        deadline = self._deadline_from(current_handler.initialize())
 
         while True:
             now = mtime()
             debug("now = " + str(now))
 
-            if now >= max_mono_time:
+            if deadline is not None and now >= deadline:
                 debug("timeout occurred")
                 break
 
-            timeout = max_mono_time - now
+            timeout = None if deadline is None else deadline - now
             debug("waiting for " + str(timeout))
             try:
-                msg = self.__message_queue.get(block=True, timeout=timeout)
+                event = self._message_queue.get(block=True, timeout=timeout)
             except Empty:
                 # If a time change (due to network time availability) occurs while waiting for an event,
                 # Queue.get will return Empty early:
@@ -135,53 +89,58 @@ class Marta(object):
                 debug("possible timeout @ " + str(mtime()))
                 continue
 
-            event = msg[0]
-            params = msg[1:]
+            debug("%r", event)
 
-            if event == Marta.EVENT_INTERRUPT:
-                debug("Critical: Interrupt event!")
-                break
-
-            elif event == Marta.EVENT_MPG123_ERROR:
-                debug("Critical: MPG123 error event!")
-                break
-
-            elif event == Marta.EVENT_RFID_TAG:
-                tag = params[0]
-
-                if tag == Marta.INTERRUPT_TAG:
-                    # exit() must not be called here: SystemExit would skip
-                    # terminate() and leave GPIO/mpg123/LED threads dangling.
-                    debug("Critical: Interrupt tag event!")
-                    exit_val = Marta.EXIT_DEBUG
+            # Phase 1: interrupts and handler switches. A tag switch does not
+            # skip phase 2 below - the newly-switched handler still receives
+            # the same event afterwards (matches the legacy if/elif exactly).
+            match event:
+                case Interrupted():
+                    debug("Critical: Interrupt event!")
                     break
 
-                if tag in TAG_TO_HANDLER:
+                case PlayerDied():
+                    debug("Critical: MPG123 error event!")
+                    break
+
+                case TagPlaced(tag) if tag == self._config.interrupt_tag:
+                    debug("Critical: Interrupt tag event!")
+                    exit_val = EXIT_CODE_DEBUG
+                    break
+
+                case TagPlaced(tag) if tag in self._handlers_by_tag:
                     current_handler.uninitialize()
-                    current_handler = TAG_TO_HANDLER[tag].get_instance(self)
-                    max_mono_time = mtime() + current_handler.initialize()
+                    current_handler = self._handlers_by_tag[tag]
+                    deadline = self._deadline_from(current_handler.initialize())
 
-            debug(Marta.EVENT_HUMAN_READABLE[event] + ": " + str(params))
-            if event == Marta.EVENT_ROTATION:
-                return_val = current_handler.rotation_event(params[0], params[1])
-            elif event == Marta.EVENT_SONG_STOPPED:
-                return_val = current_handler.player_stop_event()
-            elif event == Marta.EVENT_RFID_TAG:
-                return_val = current_handler.rfid_tag_event(params[0])
-            elif event == Marta.EVENT_BUTTON:
-                return_val = current_handler.button_event(params[0], params[1])
-            else:
-                raise Exception("Unknown event: " + str(event))
+                case _:
+                    pass
 
-            if return_val is None:
+            # Phase 2: unconditional dispatch to whatever the current handler
+            # is now (freshly switched, above, or unchanged).
+            match event:
+                case ButtonPressed(button, millis):
+                    result = current_handler.button_event(button, millis)
+                case PlaybackStopped():
+                    result = current_handler.player_stop_event()
+                case TagPlaced(tag):
+                    result = current_handler.rfid_tag_event(tag)
+                case TagRemoved():
+                    result = current_handler.rfid_tag_event(None)
+                case _:
+                    # Interrupted/PlayerDied already broke out of the loop
+                    # above and never reach here.
+                    raise AssertionError(f"unreachable: {event!r}")
+
+            if result is None:
                 debug("not changing the timeout")
             else:
-                if return_val == MartaHandler.EVENT_HANDLER_DONE:
+                if isinstance(result, Done):
                     debug("This event handler is done.")
                     current_handler.uninitialize()
-                    current_handler = TAG_TO_HANDLER["default"].get_instance(self)
-                    return_val = current_handler.initialize()
-                max_mono_time = mtime() + return_val
+                    current_handler = self._default_handler
+                    result = current_handler.initialize()
+                deadline = self._deadline_from(result)
 
         current_handler.uninitialize()
         return exit_val
@@ -190,124 +149,48 @@ class Marta(object):
         debug("Terminating!")
 
         try:
-            self.player.set_volume(Marta.SYSTEM_SOUND_VOLUME)
-            self.player.set_pitch(100)
-            self.player.load_track_from_file(Marta.SHUTDOWN_SOUND_PATH)
-            self.player.play_track()
+            self._player.set_volume(self._config.system_sound_volume)
+            self._player.set_pitch(self._config.default_pitch)
+            self._player.load_track_from_file(self._config.shutdown_sound_path)
+            self._player.play_track()
         except:
             pass
 
         try:
-            self.leds.shutdown()
+            self._leds.shutdown()
         except:
             pass
 
         try:
             for i in range(20):
-                Buttons.set_status_led(i % 2)
+                self._button_input.set_status_led(bool(i % 2))
                 sleep(0.2)
         except:
             pass
 
-        # try:
-            # self.mpu.terminate()
-        # except:
-            # pass
-
         try:
-            self.player.terminate()
+            self._player.terminate()
         except:
             pass
 
         try:
-            self.rfid_reader.terminate()
+            self._rfid_reader.terminate()
         except:
             pass
 
         try:
-            self.leds.terminate()
+            self._leds.terminate()
         except:
             pass
 
         try:
             for i in range(10):
-                Buttons.set_status_led(i % 2)
+                self._button_input.set_status_led(bool(i % 2))
                 sleep(0.2)
         except:
             pass
 
         try:
-            Buttons.terminate()
+            self._button_input.terminate()
         except:
             pass
-
-
-def main():
-    logger = getLogger('')
-    logger.setLevel(DEBUG)
-    formatter = Formatter("%(asctime)s.%(msecs)03d | %(name)s |    %(message)s", "%H:%M:%S")
-
-    if "log2stdout" in argv:
-        ch = StreamHandler(stdout)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-
-    fh = handlers.RotatingFileHandler(MARTA_BASE_DIR + "/logs/mmm.log", maxBytes=(1024 * 1024 * 10), backupCount=10)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-
-    debug("#################################################")
-    debug("#                  INITIALIZED                  #")
-    debug("#              " + strftime("%Y-%m-%d %H:%M:%S") + "              #")
-    debug("#################################################")
-
-    debug(r"""
-
-                            _    _        _                                _
-                           | |  | |      | |                              | |         
-                           | |  | |  ___ | |  ___  ___   _ __ ___    ___  | |_  ___   
-                           | |/\| | / _ \| | / __|/ _ \ | '_ ` _ \  / _ \ | __|/ _ \  
-                           \  /\  /|  __/| || (__| (_) || | | | | ||  __/ | |_| (_) | 
-                            \/  \/  \___||_| \___|\___/ |_| |_| |_| \___|  \__|\___/  
-                                                           
-                                                           
-    
-    MMMMMMMM               MMMMMMMM     MMMMMMMM               MMMMMMMM     MMMMMMMM               MMMMMMMM
-    M:::::::M             M:::::::M     M:::::::M             M:::::::M     M:::::::M             M:::::::M
-    M::::::::M           M::::::::M     M::::::::M           M::::::::M     M::::::::M           M::::::::M
-    M:::::::::M         M:::::::::M     M:::::::::M         M:::::::::M     M:::::::::M         M:::::::::M
-    M::::::::::M       M::::::::::M     M::::::::::M       M::::::::::M     M::::::::::M       M::::::::::M
-    M:::::::::::M     M:::::::::::M     M:::::::::::M     M:::::::::::M     M:::::::::::M     M:::::::::::M
-    M:::::::M::::M   M::::M:::::::M     M:::::::M::::M   M::::M:::::::M     M:::::::M::::M   M::::M:::::::M
-    M::::::M M::::M M::::M M::::::M     M::::::M M::::M M::::M M::::::M     M::::::M M::::M M::::M M::::::M
-    M::::::M  M::::M::::M  M::::::M     M::::::M  M::::M::::M  M::::::M     M::::::M  M::::M::::M  M::::::M
-    M::::::M   M:::::::M   M::::::M     M::::::M   M:::::::M   M::::::M     M::::::M   M:::::::M   M::::::M
-    M::::::M    M:::::M    M::::::M     M::::::M    M:::::M    M::::::M     M::::::M    M:::::M    M::::::M
-    M::::::M     MMMMM     M::::::M     M::::::M     MMMMM     M::::::M     M::::::M     MMMMM     M::::::M
-    M::::::M               M::::::M     M::::::M               M::::::M     M::::::M               M::::::M
-    M::::::M               M::::::M     M::::::M               M::::::M     M::::::M               M::::::M
-    M::::::M               M::::::M     M::::::M               M::::::M     M::::::M               M::::::M
-    MMMMMMMM               MMMMMMMM     MMMMMMMM               MMMMMMMM     MMMMMMMM               MMMMMMMM
-    
-    """)
-
-    debug("initializing")
-    marta = Marta()
-    signal(SIGINT, lambda s, f: marta.interrupt())
-
-    debug("looping")
-    try:
-        exit_val = marta.message_loop()
-    except Exception as e:
-        debug("excepted: " + str(e))
-        debug(traceback.format_exc())
-        exit_val = 1
-
-    marta.terminate()
-
-    debug("exiting")
-    exit(exit_val)
-
-
-if __name__ == "__main__":
-    main()

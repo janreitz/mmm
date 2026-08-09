@@ -1,8 +1,12 @@
 from subprocess import Popen, PIPE, STDOUT
 from threading import Thread, Event
 from logging import getLogger
+from typing import Callable
 
-debug = getLogger('    MPG123').debug
+from marta.events import Event as MartaEvent
+from marta.events import PlaybackStopped, PlayerDied
+
+debug = getLogger("    MPG123").debug
 
 
 class MPG123Player(object):
@@ -17,9 +21,10 @@ class MPG123Player(object):
 
     _DEFAULT_VOLUME = 50
     _DEFAULT_PITCH = 100
-    _MPG123_BINARY = "mpg123"
 
-    def __init__(self, on_stop_callback, on_error_callback, volume=_DEFAULT_VOLUME, pitch=_DEFAULT_PITCH):
+    def __init__(
+        self, mpg123_binary: str, post: Callable[[MartaEvent], None], volume=_DEFAULT_VOLUME, pitch=_DEFAULT_PITCH
+    ):
         self._ipc_timeout = 10
         self._current_state = MPG123Player.STATE_STOPPED
         self._program_responded = Event()
@@ -34,9 +39,12 @@ class MPG123Player(object):
 
         self._current_file = None
 
-        self._on_stop_callback = on_stop_callback
-        self._on_error_callback = on_error_callback
-        self._mpg123_process = Popen([MPG123Player._MPG123_BINARY, "--remote"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
+        self._post = post
+        # Gates PlayerDied specifically: terminate() clears this so an
+        # expected process exit during shutdown is not reported as a crash.
+        # PlaybackStopped is never gated the same way - see terminate().
+        self._post_died_on_exit = True
+        self._mpg123_process = Popen([mpg123_binary, "--remote"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
 
         self._read_sout_thread = Thread(target=self._read_sout)
         self._read_sout_thread.daemon = True
@@ -44,7 +52,7 @@ class MPG123Player(object):
         self._was_error = False
 
         # this prevents mpg123 from spamming the stdout with positional information
-        self._command('SILENCE')
+        self._command("SILENCE")
         self._ipc_timeout = MPG123Player._DEFAULT_IPC_TIMEOUT_IN_SECONDS
 
         self.set_volume(volume)
@@ -54,73 +62,73 @@ class MPG123Player(object):
     def _mpg123_input(self, line):
         debug("< " + str(line))
 
-        if line.startswith(b'@R MPG123'):
+        if line.startswith(b"@R MPG123"):
             debug("mpg123 startup")
             self._program_responded.set()
             return
-        
-        if line.startswith(b'@I '):
+
+        if line.startswith(b"@I "):
             # Informational metadata (ID3 etc.) emitted while a track is loading.
             # Must not count as a command response: LP is only finished when @P
             # arrives, and treating @I as the answer desyncs the whole protocol.
             debug("metadata info message: %s", line)
             return
 
-        if line.startswith(b'@E '):
+        if line.startswith(b"@E "):
             self._was_error = True
             self._program_responded.set()
             return
 
-        if line.startswith(b'@P 0'):
+        if line.startswith(b"@P 0"):
             self._current_state = MPG123Player.STATE_STOPPED
             self._program_responded.set()
             self._current_file = None
-            self._on_stop_callback()
+            self._post(PlaybackStopped())
             debug("state=STOPPED")
             return
 
-        if line.startswith(b'@P 1'):
+        if line.startswith(b"@P 1"):
             self._current_state = MPG123Player.STATE_PAUSED
             debug("state=PAUSED")
             self._program_responded.set()
             return
 
-        if line.startswith(b'@P 2'):
+        if line.startswith(b"@P 2"):
             self._current_state = MPG123Player.STATE_PLAYING
             debug("state=PLAYING")
             self._program_responded.set()
             return
 
-        if line.startswith(b'@SAMPLE '):
+        if line.startswith(b"@SAMPLE "):
             line = line[8:-1]
-            line = line.split(b' ')
+            line = line.split(b" ")
             self._track_position_in_samples = int(line[0])
             debug("current position: %d", self._track_position_in_samples)
             self._track_length_in_samples = int(line[1])
             self._program_responded.set()
             return
 
-        if line.startswith(b'@S '):
-            sample_rate = int(line.split(b' ')[3]) / float(1000)
+        if line.startswith(b"@S "):
+            sample_rate = int(line.split(b" ")[3]) / float(1000)
             self._track_length_in_millis = int(round(self._track_length_in_samples / sample_rate))
             debug("track length: %d", self._track_length_in_millis)
             self._program_responded.set()
             return
 
-        if line.startswith(b'@K '):
+        if line.startswith(b"@K "):
             self._program_responded.set()
             return
 
-        if line.startswith(b'@V '):
+        if line.startswith(b"@V "):
             line = line[3:-1]
-            line = line.split(b'%')[0]
+            line = line.split(b"%")[0]
             self._volume = float(line)
             debug("volume: %f", self._volume)
             self._program_responded.set()
             return
 
-        if line.startswith(b'@PITCH '):
-            line = line.split(b' ')[1]
+        if line.startswith(b"@PITCH "):
+            line = line.split(b" ")[1]
             self._actual_program_pitch = round((float(line) + 1) * 100)
             debug("pitch: %f", self._actual_program_pitch)
             self._program_responded.set()
@@ -140,15 +148,15 @@ class MPG123Player(object):
 
         debug("mpg123 died")
 
-        if self._on_error_callback is not None:
-            self._on_error_callback()
+        if self._post_died_on_exit:
+            self._post(PlayerDied())
 
         self._program_responded.set()
 
     def _command(self, command):
         self._program_responded.clear()
         debug("> " + str(command))
-        self._mpg123_process.stdin.write((command + '\n').encode())
+        self._mpg123_process.stdin.write((command + "\n").encode())
         self._mpg123_process.stdin.flush()
 
         debug("waiting for max " + str(self._ipc_timeout) + " seconds")
@@ -181,7 +189,7 @@ class MPG123Player(object):
             debug("volume already set")
             return
 
-        self._command('V ' + str(volume))
+        self._command("V " + str(volume))
 
     def get_pitch(self):
         return self._pitch
@@ -200,10 +208,10 @@ class MPG123Player(object):
         pitch = float(pitch) / 100 - 1
         pitch = str(pitch)[0:8]
 
-        self._command('PITCH ' + pitch)
+        self._command("PITCH " + pitch)
 
     def _get_position_in_samples(self):
-        self._command('SAMPLE')
+        self._command("SAMPLE")
         return self._track_position_in_samples, self._track_length_in_samples
 
     def set_position_in_millis(self, position_in_millis):
@@ -211,23 +219,23 @@ class MPG123Player(object):
         if self._track_length_in_millis <= 0:
             debug("Cannot set position: track length not determined yet or is zero")
             return False
-            
+
         if self._track_length_in_samples <= 0:
             debug("Cannot set position: track samples not determined yet or is zero")
             return False
-            
+
         if position_in_millis < 0:
             debug("Cannot set position: negative position not allowed")
             return False
-            
+
         if position_in_millis > self._track_length_in_millis:
             debug(f"Position {position_in_millis}ms exceeds track length {self._track_length_in_millis}ms, clamping")
             position_in_millis = self._track_length_in_millis
-        
+
         try:
             position_in_millis /= float(self._track_length_in_millis)
             position_in_millis = int(round(position_in_millis * self._track_length_in_samples))
-            self._command('K ' + str(position_in_millis))
+            self._command("K " + str(position_in_millis))
             return True
         except Exception as e:
             debug(f"Error setting position: {e}")
@@ -238,7 +246,7 @@ class MPG123Player(object):
         if self._track_length_in_millis <= 0 or self._track_length_in_samples <= 0:
             debug("Cannot get position: track length not determined yet")
             return 0
-            
+
         try:
             current_pos, length = self._get_position_in_samples()
             if length <= 0:
@@ -254,7 +262,7 @@ class MPG123Player(object):
             return True
 
         self._current_file = file_name
-        okay = self._command('LP ' + file_name)
+        okay = self._command("LP " + file_name)
         if not okay:
             debug("Failed to load file: " + file_name)
             return False
@@ -282,7 +290,7 @@ class MPG123Player(object):
         return True
 
     def toggle(self):
-        self._command('P')
+        self._command("P")
 
     def play_track(self):
         if self._current_state == MPG123Player.STATE_PLAYING:
@@ -307,7 +315,7 @@ class MPG123Player(object):
             debug("already stopped")
             return False
 
-        self._command('S')
+        self._command("S")
         return True
 
     def terminate(self):
@@ -316,14 +324,14 @@ class MPG123Player(object):
             debug("mpg123 already terminated")
             return
 
-        self._on_error_callback = None
+        self._post_died_on_exit = False
         self._current_state = MPG123Player.STATE_TERMINATED
         if self._mpg123_process.returncode is None:
             # This strange construct is half of a historical artifact from python 3
             # and can probably be destroyed and hopefully be forgotten.
             # On the other hand: I don't know what happens then and at this point I'm too afraid to ask (or test).
             try:
-                self._command('Q')
+                self._command("Q")
                 self._mpg123_process.wait()
             except:
                 try:
@@ -343,10 +351,11 @@ class MPG123Player(object):
 
 def main():
     from time import sleep
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
+
     setup_stdout_logging()
 
-    player = MPG123Player(lambda: debug("song stopped"), lambda: debug("error"), 50)
+    player = MPG123Player("mpg123", post=lambda event: debug("%r", event), volume=50)
 
     debug("enter song file path")
     mp3_path = input()
@@ -363,7 +372,7 @@ def main():
 
     try:
         while True:
-            sleep(.5)
+            sleep(0.5)
             debug("position: " + str(player.get_position_in_millis()) + " ms")
     except:
         pass

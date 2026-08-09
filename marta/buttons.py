@@ -1,129 +1,109 @@
 from logging import getLogger
 from time import monotonic as mtime
-from gpiozero import Button, LED
+from typing import Callable
 
-debug = getLogger('   Buttons').debug
+from gpiozero import LED
+from gpiozero import Button as GpioButton
+
+from marta.events import Button, ButtonPressed, Event
+
+debug = getLogger("   Buttons").debug
 
 RUN_LED = 20
 
-YELLOW_BUTTON = 5
-BLUE_BUTTON = 6
-RED_BUTTON = 13
-GREEN_BUTTON = 26
 
-COLOR_BUTTONS = [YELLOW_BUTTON, BLUE_BUTTON, RED_BUTTON, GREEN_BUTTON]
+class ButtonInput:
+    def __init__(self, post: Callable[[Event], None]):
+        debug("setting up gpio with gpiozero")
 
-BUTTONS_HUMAN_READABLE = {
-    YELLOW_BUTTON: "YELLOW",
-    BLUE_BUTTON: "BLUE",
-    RED_BUTTON: "RED",
-    GREEN_BUTTON: "GREEN",
-}
+        self._post = post
+        self._last_pushed_time: dict[Button, int] = dict.fromkeys(Button, 0)
 
-# Global variables for gpiozero objects
-_buttons = {}
-_status_led = None
-_button_callback = None
-_buttons_last_pushed_time = {}
+        self._status_led: LED | None = LED(RUN_LED)
 
-def setup_gpio(button_callback):
-    global _buttons, _status_led, _button_callback, _buttons_last_pushed_time
-    
-    debug("setting up gpio with gpiozero")
-    
-    _button_callback = button_callback
-    
-    # Initialize button tracking
-    for pin in COLOR_BUTTONS:
-        _buttons_last_pushed_time[pin] = 0
-    
-    # Setup status LED
-    _status_led = LED(RUN_LED)
-    
-    # Setup buttons with pull-up resistors and debouncing
-    for pin in COLOR_BUTTONS:
         # bounce_time handles debouncing automatically
-        btn = Button(pin, pull_up=True, bounce_time=0.05)
-        btn.when_pressed = lambda btn_obj, pin=pin: _on_button_press(pin)
-        btn.when_released = lambda btn_obj, pin=pin: _on_button_release(pin)
-        _buttons[pin] = btn
-        debug(f"Setup button on pin {pin}")
+        self._buttons: dict[Button, GpioButton] = {}
+        for button in Button:
+            gpio_button = GpioButton(button.value, pull_up=True, bounce_time=0.05)
+            gpio_button.when_pressed = lambda _b, button=button: self._on_press(button)
+            gpio_button.when_released = lambda _b, button=button: self._on_release(button)
+            self._buttons[button] = gpio_button
+            debug(f"Setup button {button.name} on pin {button.value}")
 
-def _on_button_press(pin):
-    """Called when button is pressed down"""
-    now = int(mtime() * 1000)
-    _buttons_last_pushed_time[pin] = now
-    debug(f"Button {BUTTONS_HUMAN_READABLE.get(pin, pin)} pressed")
+    def _on_press(self, button: Button) -> None:
+        """Called when button is pressed down"""
+        now = int(mtime() * 1000)
+        self._last_pushed_time[button] = now
+        debug(f"Button {button.name} pressed")
 
-def _on_button_release(pin):
-    """Called when button is released - this is where we trigger the callback"""
-    now = int(mtime() * 1000)
-    press_time = _buttons_last_pushed_time[pin]
-    
-    if press_time == 0:
-        debug(f"Button {pin} released but no press time recorded")
-        return
-    
-    diff = now - press_time
-    _buttons_last_pushed_time[pin] = 0
-    
-    if diff < 50:  # Debounce - ignore very short presses
-        debug(f"Button {pin} press too short ({diff}ms), ignoring")
-        return
-    
-    debug("push event on pin " + str(pin) + ": " + str(diff))
-    if _button_callback:
-        _button_callback(pin, diff)
+    def _on_release(self, button: Button) -> None:
+        """Called when button is released - this is where we trigger the callback"""
+        now = int(mtime() * 1000)
+        press_time = self._last_pushed_time[button]
 
-def set_status_led(value):
-    """Set the status LED on (True/1) or off (False/0)"""
-    global _status_led
-    if _status_led:
-        if value:
-            _status_led.on()
-        else:
-            _status_led.off()
+        if press_time == 0:
+            debug(f"Button {button.name} released but no press time recorded")
+            return
 
-def is_pushed(pin):
-    """Check if a button is currently being pressed"""
-    global _buttons
-    if pin in _buttons:
-        # gpiozero already accounts for pull_up: is_pressed is True while held
-        return _buttons[pin].is_pressed
-    debug(f"Button {pin} not found in setup buttons")
-    return False
+        diff = now - press_time
+        self._last_pushed_time[button] = 0
 
-def terminate():
-    """Clean up GPIO resources"""
-    global _buttons, _status_led
-    debug("terminating")
-    
-    if _status_led:
-        _status_led.close()
-        _status_led = None
-    
-    for pin, btn in _buttons.items():
-        debug(f"Closing button {pin}")
-        btn.close()
-    _buttons.clear()
+        if diff < 50:  # Debounce - ignore very short presses
+            debug(f"Button {button.name} press too short ({diff}ms), ignoring")
+            return
+
+        debug(f"push event on {button.name}: {diff}")
+        self._post(ButtonPressed(button, diff))
+
+    def set_status_led(self, value: bool) -> None:
+        """Set the status LED on (True) or off (False)"""
+        if self._status_led:
+            if value:
+                self._status_led.on()
+            else:
+                self._status_led.off()
+
+    def is_pushed(self, button: Button) -> bool:
+        """Check if a button is currently being pressed"""
+        if button in self._buttons:
+            return self._buttons[button].is_pressed
+        debug(f"Button {button} not found in setup buttons")
+        return False
+
+    def terminate(self) -> None:
+        """Clean up GPIO resources"""
+        debug("terminating")
+
+        if self._status_led:
+            self._status_led.close()
+            self._status_led = None
+
+        for button, gpio_button in self._buttons.items():
+            debug(f"Closing button {button.name}")
+            gpio_button.close()
+        self._buttons.clear()
+
 
 ################################################################
 
+
 def main():
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
+
     setup_stdout_logging()
 
     debug("push the buttons!")
     debug("ENTER or CTRL + C to quit")
 
-    setup_gpio(lambda pin, millis: debug(BUTTONS_HUMAN_READABLE[pin] + ": " + str(millis) + " ms"))
+    button_input = ButtonInput(post=lambda event: debug("%r", event))
 
     try:
         input()
     except:
         pass
 
-    terminate()
+    button_input.terminate()
+
 
 if __name__ == "__main__":
     main()

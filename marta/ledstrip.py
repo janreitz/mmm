@@ -2,7 +2,7 @@ from queue import Queue, Empty
 from math import cos, pi
 from time import monotonic as mtime
 
-from neopixel import *
+from marta.neopixel import *
 from threading import Thread
 from logging import getLogger
 
@@ -350,7 +350,7 @@ class LEDStrip(object):
 ################################################################
 
 def main():
-    from SetupLogging import setup_stdout_logging
+    from marta.logging_setup import setup_stdout_logging
     setup_stdout_logging()
 
     debug("see the beautiful lights")

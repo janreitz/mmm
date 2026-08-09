@@ -1,91 +1,61 @@
 from logging import getLogger
-from os import listdir, environ, remove
-
-import Buttons
-from Util import sorted_aphanumeric
-from LEDStrip import LEDStrip
-from MartaHandler import MartaHandler
-from TagToDir import TAG_TO_DIR, prepare, ALBUM_INDICATOR_FILE
+from os import listdir, remove
 from os.path import exists
 
-debug = getLogger('MscHandler').debug
+from marta.util import sorted_aphanumeric
+from marta.ledstrip import LEDStrip
+from marta.handler import Handler, Never
+from marta.events import Button
+from marta.config import Config
+from marta.player import MPG123Player
+from marta.tag_to_dir import TAG_TO_DIR, prepare, ALBUM_INDICATOR_FILE
 
-MARTA_BASE_DIR = environ["MARTA"]
+debug = getLogger("MscHandler").debug
 
 
-class MusicHandler(MartaHandler):
-    PITCHES = [55, 70, 85, 100, 115, 130, 145, 160, 175, 190]
-    DEFAULT_PITCH = 100
+class MusicHandler(Handler):
+    LONG_CLICK_THRESHOLD = 1500
 
-    # Floor at 2: volume 1 is inaudible in practice and made the box look
-    # dead. 2 is the system sound volume, so it is known to be audible.
-    VOLUMES = [2, 3, 4, 5, 7, 9, 12, 15, 18, 22]
-    DEFAULT_VOLUME = 2
-
-    BRIGHTNESSES = [0, 28, 56, 84, 112, 140, 168, 196, 224, 255]
-    DEFAULT_BRIGHTNESS = 255
+    SONG_STATE_FILE = ".songstate"
 
     CONTROL_PITCH = 0
     CONTROL_VOLUME = 1
     CONTROL_BRIGHTNESS = 2
 
-    SONG_DIR = MARTA_BASE_DIR + "/audio/"
-    UNKNOWN_TAG_FILE = SONG_DIR + "/unknown_tag.txt"
+    def __init__(self, player: MPG123Player, leds: LEDStrip, config: Config):
+        self.player = player
+        self.leds = leds
+        self.config = config
 
-    SONG_STATE_FILE = ".songstate"
-
-    # The box no longer exits on idle: the battery lasts long enough, and a
-    # silently exited marta made the box look dead. The status LED shows the
-    # idle state instead, and the power button turns the box off.
-    LONG_TIMEOUT = MartaHandler.TIMEOUT_NEVER
-    SHORT_TIMEOUT = MartaHandler.TIMEOUT_NEVER
-
-    LONG_CLICK_THRESHOLD = 1500
-
-    #################
-    # SINGLETON
-    instance = None
-
-    @staticmethod
-    def get_instance(marta):
-        if MusicHandler.instance is None:
-            MusicHandler.instance = MusicHandler(marta)
-        return MusicHandler.instance
-
-    #################
-
-    def __init__(self, marta):
-        super(MusicHandler, self).__init__(marta)
         self.currently_controlling = MusicHandler.CONTROL_VOLUME
-        self.all_songs = None
+        self.all_songs: list[str] | None = None
         self.current_song_index = 0
-        self.current_song_dir = None
-        self.current_tag = None
+        self.current_song_dir: str | None = None
+        self.current_tag: str | None = None
         self.expected_stop = False
 
-        if exists(MusicHandler.UNKNOWN_TAG_FILE):
+        if exists(config.unknown_tag_file):
             debug("unknown tag file exists. removing")
-            remove(MusicHandler.UNKNOWN_TAG_FILE)
+            remove(config.unknown_tag_file)
 
-        prepare(MusicHandler.SONG_DIR)
+        prepare(config.audio_dir)
 
     def initialize(self):
         debug("init")
         # breathing ring = powered but idle, as a reminder to turn the box off
-        self.marta.leds.breathe()
-        return MusicHandler.SHORT_TIMEOUT
+        self.leds.breathe()
+        return Never()
 
     def save_state_and_stop(self):
         # The track may already have stopped on its own (song end racing with
         # tag removal). Don't toggle pause then, it would start playback again.
-        if not self.marta.player.is_track_stopped():
-            self.marta.player.pause_track()
+        if not self.player.is_track_stopped():
+            self.player.pause_track()
 
         debug("Saving state.")
-        with open(self.current_song_dir + "/" + MusicHandler.SONG_STATE_FILE, 'w') as state_file:
+        with open(self.current_song_dir + "/" + MusicHandler.SONG_STATE_FILE, "w") as state_file:
             debug("writing to file: " + self.current_song_dir + "/" + MusicHandler.SONG_STATE_FILE)
-            state_file.write(
-                str(self.current_song_index) + "\n" + str(self.marta.player.get_position_in_millis()) + "\n")
+            state_file.write(str(self.current_song_index) + "\n" + str(self.player.get_position_in_millis()) + "\n")
         self.current_song_dir = None
         self.current_tag = None
         self.all_songs = None
@@ -93,7 +63,7 @@ class MusicHandler(MartaHandler):
 
         # Only expect a stop event if a stop command was actually sent,
         # otherwise the flag would swallow the next real song-end event.
-        self.expected_stop = self.marta.player.stop_track()
+        self.expected_stop = self.player.stop_track()
 
     def load_state(self, tag):
         debug("Loading state.")
@@ -125,26 +95,26 @@ class MusicHandler(MartaHandler):
 
     def rfid_removed_event(self):
         debug("tag removed.")
-        self.marta.leds.fade_up_and_down(LEDStrip.RED)
+        self.leds.fade_up_and_down(LEDStrip.RED)
         self.save_state_and_stop()
-        self.marta.leds.breathe()
-        return MusicHandler.SHORT_TIMEOUT
+        self.leds.breathe()
+        return Never()
 
     def rfid_music_tag_event(self, tag):
         current_position = self.load_state(tag)
-        self.marta.player.load_track_from_file(self.all_songs[self.current_song_index])
+        self.player.load_track_from_file(self.all_songs[self.current_song_index])
         if current_position != 0:
-            self.marta.player.set_position_in_millis(current_position)
+            self.player.set_position_in_millis(current_position)
 
         # end the sticky idle breathing: the ring stays dark during playback
-        self.marta.leds.clear()
+        self.leds.clear()
 
         if len(self.all_songs) == 1:
-            self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
+            self.leds.fade_up_and_down(LEDStrip.GREEN)
         else:
-            self.marta.leds.song(self.current_song_index, len(self.all_songs))
-        self.marta.player.play_track()
-        return MusicHandler.LONG_TIMEOUT
+            self.leds.song(self.current_song_index, len(self.all_songs))
+        self.player.play_track()
+        return Never()
 
     def rfid_tag_event(self, tag):
         debug("tag=%s", tag)
@@ -153,13 +123,13 @@ class MusicHandler(MartaHandler):
             if self.current_tag is None:
                 debug("probably removed unknown tag")
 
-                if exists(MusicHandler.UNKNOWN_TAG_FILE):
+                if exists(self.config.unknown_tag_file):
                     debug("unknown tag file exists. removing")
-                    remove(MusicHandler.UNKNOWN_TAG_FILE)
+                    remove(self.config.unknown_tag_file)
 
-                self.marta.leds.fade_up_and_down(LEDStrip.RED)
-                self.marta.leds.breathe()
-                return MusicHandler.SHORT_TIMEOUT
+                self.leds.fade_up_and_down(LEDStrip.RED)
+                self.leds.breathe()
+                return Never()
 
             return self.rfid_removed_event()
 
@@ -167,14 +137,14 @@ class MusicHandler(MartaHandler):
             self.current_song_dir = None
             debug("unknown tag")
 
-            with open(MusicHandler.UNKNOWN_TAG_FILE, "w") as unknown_tag_file:
+            with open(self.config.unknown_tag_file, "w") as unknown_tag_file:
                 debug("writing to unknown tag file")
                 unknown_tag_file.write(tag)
 
-            self.marta.leds.fade_up_and_down(LEDStrip.ORANGE)
+            self.leds.fade_up_and_down(LEDStrip.ORANGE)
             # still waiting for a usable tag
-            self.marta.leds.breathe()
-            return MusicHandler.LONG_TIMEOUT
+            self.leds.breathe()
+            return Never()
 
         return self.rfid_music_tag_event(tag)
 
@@ -182,60 +152,62 @@ class MusicHandler(MartaHandler):
         debug("rotation event!")
         if x < -45:
             if self.currently_controlling == MusicHandler.CONTROL_BRIGHTNESS:
-                return
+                return None
 
             self.currently_controlling = MusicHandler.CONTROL_BRIGHTNESS
-            self.marta.leds.fade_up_and_down(LEDStrip.PURPLE)
+            self.leds.fade_up_and_down(LEDStrip.PURPLE)
             debug("now controlling brightness")
-            return
+            return None
 
         if x > 45:
             if self.currently_controlling == MusicHandler.CONTROL_PITCH:
-                return
+                return None
 
             self.currently_controlling = MusicHandler.CONTROL_PITCH
-            self.marta.leds.fade_up_and_down(LEDStrip.YELLOW)
+            self.leds.fade_up_and_down(LEDStrip.YELLOW)
             debug("now controlling pitch")
-            return
+            return None
 
         if self.currently_controlling == MusicHandler.CONTROL_VOLUME:
-            return
+            return None
 
         self.currently_controlling = MusicHandler.CONTROL_VOLUME
-        self.marta.leds.fade_up_and_down(LEDStrip.BLUE)
+        self.leds.fade_up_and_down(LEDStrip.BLUE)
         debug("now controlling volume")
+        return None
 
     def player_stop_event(self):
         if self.expected_stop:
             self.expected_stop = False
             debug("ignoring this event because stopping is expected")
-            return
+            return None
 
         if self.all_songs is None:
             debug("stop event without an active tag. ignoring")
-            return
+            return None
 
         self.current_song_index = (self.current_song_index + 1) % len(self.all_songs)
         if len(self.all_songs) == 1:
-            self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
+            self.leds.fade_up_and_down(LEDStrip.GREEN)
         else:
-            self.marta.leds.song(self.current_song_index, len(self.all_songs))
-        self.marta.player.load_track_from_file(self.all_songs[self.current_song_index])
-        self.marta.player.play_track()
+            self.leds.song(self.current_song_index, len(self.all_songs))
+        self.player.load_track_from_file(self.all_songs[self.current_song_index])
+        self.player.play_track()
+        return None
 
-    def button_red_green_event(self, pin, millis):
+    def button_red_green_event(self, button: Button, millis):
         if self.currently_controlling == MusicHandler.CONTROL_VOLUME:
             debug("change volume")
-            arr = MusicHandler.VOLUMES
-            current = self.marta.player.get_volume()
+            arr = self.config.volumes
+            current = self.player.get_volume()
         elif self.currently_controlling == MusicHandler.CONTROL_PITCH:
             debug("change pitch")
-            arr = MusicHandler.PITCHES
-            current = self.marta.player.get_pitch()
+            arr = self.config.pitches
+            current = self.player.get_pitch()
         else:
             debug("change brightness")
-            arr = MusicHandler.BRIGHTNESSES
-            current = self.marta.leds.get_brightness()
+            arr = self.config.brightnesses
+            current = self.leds.get_brightness()
 
         debug("current value: " + str(current))
 
@@ -247,29 +219,29 @@ class MusicHandler(MartaHandler):
             current = min(range(len(arr)), key=lambda i: abs(arr[i] - current))
             debug("current value not on the scale, snapping to index " + str(current))
 
-        if pin == Buttons.GREEN_BUTTON:
+        if button == Button.GREEN:
             new = current + 1
         else:
             new = current - 1
 
         if new < 0 or new >= len(arr):
             debug("would be out of bounds")
-            self.marta.leds.volume(current)
+            self.leds.volume(current)
             return
 
-        self.marta.leds.volume(new)
+        self.leds.volume(new)
 
         new = arr[new]
         debug("new value: " + str(new))
 
         if self.currently_controlling == MusicHandler.CONTROL_VOLUME:
-            self.marta.player.set_volume(new)
+            self.player.set_volume(new)
         elif self.currently_controlling == MusicHandler.CONTROL_PITCH:
-            self.marta.player.set_pitch(new)
+            self.player.set_pitch(new)
         else:
-            self.marta.leds.set_brightness(new)
+            self.leds.set_brightness(new)
 
-    def button_next_previous_album(self, pin):
+    def button_next_previous_album(self, button: Button):
         album_indicator = self.current_song_dir + "/" + ALBUM_INDICATOR_FILE
         if exists(album_indicator):
             debug("removing album indicator: " + album_indicator)
@@ -277,7 +249,7 @@ class MusicHandler(MartaHandler):
 
         tag = self.current_tag
 
-        off = 1 if pin == Buttons.YELLOW_BUTTON else -1
+        off = 1 if button == Button.YELLOW else -1
         TAG_TO_DIR[self.current_tag] = TAG_TO_DIR[self.current_tag][off:] + TAG_TO_DIR[self.current_tag][:off]
         debug("changed album order: " + self.current_tag + "=" + str(TAG_TO_DIR[self.current_tag]))
 
@@ -285,16 +257,16 @@ class MusicHandler(MartaHandler):
         self.rfid_tag_event(tag)
 
         album_indicator = self.current_song_dir + "/" + ALBUM_INDICATOR_FILE
-        open(album_indicator, 'w').close()
+        open(album_indicator, "w").close()
 
-    def button_next_previous_song(self, pin):
-        if pin == Buttons.BLUE_BUTTON:
-            pos = self.marta.player.get_position_in_millis()
+    def button_next_previous_song(self, button: Button):
+        if button == Button.BLUE:
+            pos = self.player.get_position_in_millis()
             debug("pos=" + str(pos))
 
             # if we are at the beginning of a song, skip to the beginning
             if pos > 2000:
-                self.marta.player.set_position_in_millis(0)
+                self.player.set_position_in_millis(0)
                 off = 0
             else:
                 off = -1
@@ -302,42 +274,40 @@ class MusicHandler(MartaHandler):
             off = 1
 
         if off != 0:
-            self.expected_stop = self.marta.player.stop_track()
+            self.expected_stop = self.player.stop_track()
             self.current_song_index = (self.current_song_index + off) % len(self.all_songs)
-            self.marta.player.load_track_from_file(self.all_songs[self.current_song_index])
-            self.marta.player.play_track()
+            self.player.load_track_from_file(self.all_songs[self.current_song_index])
+            self.player.play_track()
 
         if len(self.all_songs) == 1:
-            self.marta.leds.fade_up_and_down(LEDStrip.GREEN)
+            self.leds.fade_up_and_down(LEDStrip.GREEN)
             return
 
-        self.marta.leds.song(self.current_song_index, len(self.all_songs), forward=pin == Buttons.YELLOW_BUTTON)
+        self.leds.song(self.current_song_index, len(self.all_songs), forward=button == Button.YELLOW)
 
-    def button_event(self, pin, millis):
-        debug("pin: " + Buttons.BUTTONS_HUMAN_READABLE[pin])
+    def button_event(self, button: Button, millis):
+        debug("button: %s", button.name)
 
-        if pin == Buttons.YELLOW_BUTTON or pin == Buttons.BLUE_BUTTON:
+        if button == Button.YELLOW or button == Button.BLUE:
             if self.current_tag is None:
                 debug("no tag. ignore")
-                return MusicHandler.SHORT_TIMEOUT
+                return Never()
 
             if millis > MusicHandler.LONG_CLICK_THRESHOLD and len(TAG_TO_DIR[self.current_tag]) > 1:
-                self.button_next_previous_album(pin)
+                self.button_next_previous_album(button)
             else:
-                self.button_next_previous_song(pin)
-        elif pin == Buttons.GREEN_BUTTON or pin == Buttons.RED_BUTTON:
-            self.button_red_green_event(pin, millis)
+                self.button_next_previous_song(button)
+        elif button == Button.GREEN or button == Button.RED:
+            self.button_red_green_event(button, millis)
 
         if self.current_tag is None:
             # make sure breathing is on: it resumes by itself once the
             # volume/pitch/brightness animation has finished
-            self.marta.leds.breathe()
-            return MusicHandler.SHORT_TIMEOUT
-        else:
-            return MusicHandler.LONG_TIMEOUT
+            self.leds.breathe()
+        return Never()
 
     def uninitialize(self):
         debug("uninitialize")
-        self.marta.leds.clear()
+        self.leds.clear()
         if self.current_tag is not None:
             self.save_state_and_stop()
