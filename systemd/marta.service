@@ -19,7 +19,7 @@ Environment=MARTA=/home/jan/mmm
 # and every crash/restart cycle costs several seconds of python startup on the
 # Zero. Give up after 30s and let the restart logic take over as fallback.
 ExecStartPre=/bin/sh -c 'i=0; until [ -e /dev/snd/controlC0 ] || [ $i -ge 150 ]; do i=$((i+1)); sleep 0.2; done'
-ExecStart=/home/jan/mmm/marta/env/bin/python /home/jan/mmm/marta/Marta.py
+ExecStart=/home/jan/mmm/env/bin/python -m marta
 User=root
 Restart=on-failure
 RestartSec=2

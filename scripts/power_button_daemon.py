@@ -18,12 +18,15 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 def is_marta_running():
-    """Check if Marta.py is currently running"""
+    """Check if the marta package (`python -m marta`) is currently running"""
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             if 'python' in proc.info['name'].lower():
-                cmdline = ' '.join(proc.info['cmdline'] or [])
-                if 'Marta.py' in cmdline:
+                cmdline = proc.info['cmdline'] or []
+                # Match the exact "-m marta" invocation, not a substring of
+                # the python path - matters since it changed from Marta.py to
+                # a package entry point (marta.service's ExecStart).
+                if cmdline[-2:] == ['-m', 'marta']:
                     return proc.info['pid']
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
