@@ -14,6 +14,11 @@ dependencies = [
     # provides the _rpi_ws281x SWIG module used by the vendored neopixel.py shim;
     # only installable/useful on the Pi itself
     'rpi-ws281x; platform_machine == "armv6l" or platform_machine == "armv7l" or platform_machine == "aarch64"',
+    # gpiozero's pin factory. Without it, gpiozero falls back all the way to
+    # its legacy sysfs-based NativeFactory, which fails outright on current
+    # Raspberry Pi OS kernels (no working /sys/class/gpio export). lgpio is
+    # gpiozero's first-choice backend and what the box's original venv had.
+    'lgpio; platform_machine == "armv6l" or platform_machine == "armv7l" or platform_machine == "aarch64"',
 ]
 
 [project.optional-dependencies]
