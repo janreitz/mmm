@@ -35,9 +35,10 @@ These do not change, ever, without a separate decision:
 
 ## Target picture (stages 3–5, summary only)
 
-- Stage 3: split `MusicHandler` into `library.py` (pure tag→album scan +
-  songstate persistence, unit-tested) and an explicit state machine
-  (`Idle` / `Playing` / special modes) — this is where "intuitive" happens.
+- Stage 3 (**shipped**, see the detailed section below): split
+  `MusicHandler` into `library.py` (pure tag→album scan + songstate
+  persistence, unit-tested) and an explicit state machine (`Idle` /
+  `Playing`) — this is where "intuitive" happens.
 - Stage 4: swap the threaded core for an asyncio event loop. Hardware stays
   behind thread adapters bridging via `call_soon_threadsafe`; animations
   become cancellable tasks (replaces `SleepInterruptedException` + the sticky
@@ -319,6 +320,117 @@ today. (TOML file support is a later nicety, not stage 2.)
    `lgpio` as an explicit ARM-gated dependency (confirmed via the old venv's
    `pip list` that lgpio was what actually backed gpiozero there).
 3. ~~Unit switched to `python -m marta`~~ **done**, deployed and verified.
+
+## Stage 3 — split MusicHandler into Library + an explicit Idle/Playing state machine
+
+**Status: shipped, not yet verified on-device.**
+
+Goal: the implicit state that used to live as a scattering of `Optional`
+fields on `MusicHandler` (`current_tag`/`current_song_dir`/`all_songs`,
+where "all `None`" meant Idle) becomes explicit — and everything that
+touches the filesystem moves out into a pure, hardware-free, genuinely
+unit-tested module.
+
+### `library.py` (absorbs `tag_to_dir.py`)
+
+A `Library` class owning every filesystem interaction with the audio
+directory: tag/album scanning + the same validation `tag_to_dir.prepare()`
+did (same error text), album rotation plus its on-disk `.albumindicator`
+marker, `.songstate` persistence, and the unknown-tag scratch file.
+`MusicHandler` never touches the filesystem directly again — only through
+`Library`. No player/LED/config-beyond-paths dependencies, so it's tested
+(`tests/test_library.py`, 11 cases) against a real temp directory — no
+fakes needed, this is the first genuinely hardware-free test coverage for
+the actual business logic. The standalone `python -m marta.tag_to_dir
+<path>` validation CLI moved to `python -m marta.library <path>`.
+
+`tag_to_dir.py` is deleted (absorbed), same pattern as `TagToHandler.py`
+in stage 2.
+
+### `music_handler.py`: `Idle` / `Playing` as data, not inference
+
+```python
+@dataclass
+class Idle:
+    pass
+
+@dataclass
+class Playing:
+    tag: str
+    album_dir: str
+    songs: list[str]
+    song_index: int = 0
+```
+
+Event methods dispatch with `match self.state:` into per-state handling.
+This is what let mypy's `music_handler.py` permissive override from stage
+2 come off cleanly (dropped from `pyproject.toml`) — the None-safety that
+used to depend on a runtime invariant the types couldn't see ("these
+fields are only valid when `current_tag` is not `None`") is now enforced
+by which state exists; mypy passes on the real types with no override.
+
+`currently_controlling` (the volume/pitch/brightness selector) stays a
+`MusicHandler`-level field, not part of either state — it's set once and
+persists across Idle/Playing transitions in the original code (green/red
+buttons adjust it regardless of whether a tag is present), so scoping it
+to a state would have been a behavior change.
+
+### Two behaviors traced carefully to avoid regressing them
+
+Both are covered by dedicated cases in `tests/test_music_handler.py` (16
+cases total):
+
+- **`expected_stop` stays a `MusicHandler`-level field, not part of
+  `Playing`.** It's armed while switching albums to swallow the *old*
+  album's stray stop-event after the *new* one is already loaded and
+  playing. Scoping it to a fresh `Playing` instance (the natural-seeming
+  choice) would have silently broken that suppression — the old album's
+  delayed `PlaybackStopped` would hit the new `Playing` object with
+  `expected_stop=False` and get misread as "the new song ended,"
+  advancing it immediately. Caught by reasoning through the sequence
+  before writing code, not by a test catching it after the fact — worth
+  noting because it's exactly the kind of bug this refactor's whole
+  premise says explicit modeling should prevent, and it *would* have
+  reintroduced a subtle one if the state boundary had been drawn on
+  instinct instead of by tracing the original's actual field lifetimes.
+- **Unknown-tag / known-tag dispatch stays state-agnostic** in
+  `rfid_tag_event`, matching the original exactly: only the tag-is-`None`
+  case differs by state (Idle → "probably an unknown tag's removal, clear
+  the marker"; Playing → real removal, save and stop). A non-`None` tag is
+  handled the same way regardless of prior state, including the original's
+  own quirk that a known tag arriving without a preceding removal (should
+  not happen with real hardware, which always alternates place/remove)
+  switches straight to the new tag without saving the old one — preserved
+  as-is rather than "fixed," since silently changing that during a
+  refactor would make it hard to attribute any resulting behavior change.
+
+### Bugs and incidental fixes found while rewriting
+
+- **A real bug caught by the new tests before it ever reached hardware**:
+  my first draft of `Library.__init__` scanned the audio directory *before*
+  clearing a stale `unknown_tag_file` left over from a previous run. Since
+  that file lives directly in `audio_dir`, the scan rejects any top-level
+  entry that isn't a tag directory (or `system`) — so a leftover file would
+  make the scan itself fail and crash startup. The original order was
+  clear-then-scan; stage 3's first draft had it backwards. Fixed to match.
+- **Incidental fixes**, both inside code being actively rewritten (not
+  drive-by changes to untouched files): the "tag found twice" error message
+  concatenated a string with a list (`TAG_TO_DIR[tag]` is a list of album
+  dirs), which would have raised `TypeError` instead of the intended
+  `Exception` if that path ever triggered — now shows the first conflicting
+  album dir. Also stopped shadowing the `compile`/`match` builtins on
+  import from `re` (aliased to `re_compile`/`re_match`).
+
+### Verification gate for stage 3
+
+1. ~~`make check` green~~ **done** — ruff, mypy (with the stage-2
+   `music_handler.py` override removed, not just kept-and-ignored), pytest
+   (35 cases across all suites, up from 8 before this stage).
+2. **On-device checklist — not yet run**: same as stage 2's (jingle, breathe
+   on idle, tag place/resume/remove/save, volume buttons, long-press album
+   switch specifically — this stage's riskiest path — rainbow/button-light
+   tags, interrupt tag, power-button graceful shutdown). No unit or venv
+   changes this stage, so deploy is just an rsync of `marta/` + restart.
 
 ## Risks and rollback
 
