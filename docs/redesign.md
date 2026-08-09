@@ -323,7 +323,7 @@ today. (TOML file support is a later nicety, not stage 2.)
 
 ## Stage 3 — split MusicHandler into Library + an explicit Idle/Playing state machine
 
-**Status: shipped, not yet verified on-device.**
+**Status: shipped and verified on-device (2026-08-09).**
 
 Goal: the implicit state that used to live as a scattering of `Optional`
 fields on `MusicHandler` (`current_tag`/`current_song_dir`/`all_songs`,
@@ -421,16 +421,15 @@ cases total):
   album dir. Also stopped shadowing the `compile`/`match` builtins on
   import from `re` (aliased to `re_compile`/`re_match`).
 
-### Verification gate for stage 3
+### Verification gate for stage 3 — all done, stage 3 is complete
 
 1. ~~`make check` green~~ **done** — ruff, mypy (with the stage-2
    `music_handler.py` override removed, not just kept-and-ignored), pytest
    (35 cases across all suites, up from 8 before this stage).
-2. **On-device checklist — not yet run**: same as stage 2's (jingle, breathe
-   on idle, tag place/resume/remove/save, volume buttons, long-press album
-   switch specifically — this stage's riskiest path — rainbow/button-light
-   tags, interrupt tag, power-button graceful shutdown). No unit or venv
-   changes this stage, so deploy is just an rsync of `marta/` + restart.
+2. ~~On-device checklist~~ **done** — deployed and confirmed working,
+   including the long-press album switch (this stage's riskiest path, per
+   the `expected_stop` reasoning above). No unit or venv changes were
+   needed this stage, and none surfaced.
 
 ## Risks and rollback
 
